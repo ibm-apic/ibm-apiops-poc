@@ -28,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Authenticate to IBM Container Registry (ICR)
+        run: |
+          set -euo pipefail
+          echo "🔐 Logging into IBM Cloud Container Registry (ICR)..."
+          echo "${{ secrets.IBM_CLOUD_API_KEY }}" | docker login icr.io -u iamapikey --password-stdin
+
       - name: Use APIC Toolkit via Docker
         id: toolkit
         run: |
@@ -38,9 +44,8 @@ jobs:
           echo "✅ Toolkit image ready:"
           docker run --rm icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic --version
 
-          # Store command wrapper for later steps
+          # Store wrapper for reuse
           echo "apic_cmd=docker run --rm -v $PWD:/work -w /work icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic" >> $GITHUB_OUTPUT
-
 
 
       - name: Login to APIC
