@@ -88,21 +88,30 @@ jobs:
           file "export/products/${PROD}_${PVER}.yaml" || true
           head -n 25 "export/products/${PROD}_${PVER}.yaml" || true
         
-        # 📤 Export catalog summary (JSON only, compact)
-      - name: Export catalog summary (for portability hints)
+      - name: Export catalog summary (JSON) for portability hints
         run: |
           set -euo pipefail
-          mkdir -p export/catalog
+          META="export/catalog/${APIC_CATALOG}.json"
           URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}"
-          curl -skL ${{ steps.auth.outputs.curl_auth }} \
-            -H 'Accept: application/json' \
-            "$URL" | jq '{name, title, gateway_service_urls, portal, space_admins, subscription_config}' \
-            > "export/catalog/${APIC_CATALOG}.json"
-          cat "export/catalog/${APIC_CATALOG}.json"
 
+          # capture headers to verify JSON
+          HDR=/tmp/hdr.txt
+          curl -sS -D "$HDR" -o "$META" ${{ steps.auth.outputs.curl_auth }} "$URL" || {
+            echo "::warning::Catalog summary fetch failed."
+            exit 0
+          }
 
-      - name: Upload artifacts
+          if grep -i "content-type: application/json" "$HDR" >/dev/null; then
+            echo "✅ Catalog JSON saved at $META"
+            head -n 40 "$META" | sed 's/./&/g' | head -n 40 >/dev/null  # noop to keep step short
+            jq '.' "$META" | head -n 40
+          else
+            echo "::warning::Response was not JSON (likely HTML). Skipping jq pretty-print."
+            head -n 20 "$META" || true
+          fi
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apic-specs
+          name: apic-export
           path: export/
