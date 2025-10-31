@@ -31,7 +31,7 @@ jobs:
           echo "API:     ${{ github.event.inputs.api_file }}"
           echo "Product: ${{ github.event.inputs.product_file }}"
 
-      # 🔐 Authenticate with APIC (Basic or Cookie mode)
+      # Authenticate with APIC (Basic or Cookie mode)
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
@@ -40,16 +40,16 @@ jobs:
           USER="${APIC_USERNAME}"
           PASS="${APIC_PASSWORD}"
 
-          echo "🔎 Checking Basic authentication..."
+          echo " Checking Basic authentication..."
           STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -u "$USER:$PASS" "$BASE/api/orgs")
           if [ "$STATUS" = "200" ]; then
-            echo "✅ Using Basic authentication"
+            echo " Using Basic authentication"
             echo "mode=basic" >> $GITHUB_OUTPUT
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "🔎 Trying Cookie-based authentication..."
+          echo " Trying Cookie-based authentication..."
           COOKIE=/tmp/apic_cookie.txt
           LOGIN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
             -c "$COOKIE" -b "$COOKIE" \
@@ -60,7 +60,7 @@ jobs:
           if [ "$LOGIN_STATUS" = "200" ] || [ "$LOGIN_STATUS" = "204" ]; then
             STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")
             if [ "$STATUS" = "200" ]; then
-              echo "✅ Using Cookie authentication"
+              echo " Using Cookie authentication"
               echo "mode=cookie" >> $GITHUB_OUTPUT
               echo "cookie_path=$COOKIE" >> $GITHUB_OUTPUT
               echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
@@ -79,15 +79,15 @@ jobs:
           chmod +x /usr/local/bin/yq
           yq --version
 
-      # 🧩 Create/Update Draft API (tries both endpoint shapes + PUT fallback)
+      # Create/Update Draft API (tries both endpoint shapes + PUT fallback)
       - name: Create/Update Draft API (with fallbacks)
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
           NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
           VER=$(yq -r '.info.version' "$API_FILE")
-          echo "📦 API file: $API_FILE"
-          echo "🔖 Parsed name: $NAME, version: $VER"
+          echo "API file: $API_FILE"
+          echo "Parsed name: $NAME, version: $VER"
 
           EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
           EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis?replace=true"
@@ -111,28 +111,28 @@ jobs:
               "$url"
           }
 
-          echo "➡️  Trying POST $EP1"
+          echo "Trying POST $EP1"
           CODE=$(post_yaml "$EP1")
           if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
-            echo "✅ Draft API Created/Updated via draft-apis"
+            echo " Draft API Created/Updated via draft-apis"
             jq . /tmp/draft-api.json
             exit 0
           fi
-          echo "⚠️  POST $EP1 returned $CODE"
+          echo "POST $EP1 returned $CODE"
 
-          echo "➡️  Trying POST $EP2"
+          echo "Trying POST $EP2"
           CODE=$(post_yaml "$EP2")
           if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
-            echo "✅ Draft API Created/Updated via apis"
+            echo " Draft API Created/Updated via apis"
             jq . /tmp/draft-api.json
             exit 0
           fi
-          echo "⚠️  POST $EP2 returned $CODE"
+          echo "POST $EP2 returned $CODE"
 
-          echo "➡️  Trying PUT $EP3"
+          echo "Trying PUT $EP3"
           CODE=$(put_yaml "$EP3")
           if [[ "$CODE" == "200" || "$CODE" == "201" || "$CODE" == "204" ]]; then
-            echo "✅ Draft API Updated via PUT"
+            echo " Draft API Updated via PUT"
             jq . /tmp/draft-api.json || true
             exit 0
           fi
@@ -141,7 +141,7 @@ jobs:
           echo "Last response:"; cat /tmp/draft-api.json || true
           exit 1
 
-      # 📦 Create/Update Draft Product (tries both endpoint shapes + PUT fallback)
+      # Create/Update Draft Product (tries both endpoint shapes + PUT fallback)
       - name: Create/Update Draft Product (optional, with fallbacks)
         if: ${{ github.event.inputs.product_file != '' }}
         run: |
@@ -149,8 +149,8 @@ jobs:
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           NAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
           VER=$(yq -r '.info.version' "$PRODUCT_FILE")
-          echo "📦 Product file: $PRODUCT_FILE"
-          echo "🔖 Parsed name: $NAME, version: $VER"
+          echo "Product file: $PRODUCT_FILE"
+          echo "Parsed name: $NAME, version: $VER"
 
           EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products?replace=true"
           EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/products?replace=true"
@@ -174,28 +174,28 @@ jobs:
               "$url"
           }
 
-          echo "➡️  Trying POST $EP1"
+          echo "  Trying POST $EP1"
           CODE=$(post_yaml "$EP1")
           if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
-            echo "✅ Draft Product Created/Updated via draft-products"
+            echo " Draft Product Created/Updated via draft-products"
             jq . /tmp/draft-product.json
             exit 0
           fi
-          echo "⚠️  POST $EP1 returned $CODE"
+          echo "  POST $EP1 returned $CODE"
 
-          echo "➡️  Trying POST $EP2"
+          echo "  Trying POST $EP2"
           CODE=$(post_yaml "$EP2")
           if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
-            echo "✅ Draft Product Created/Updated via products"
+            echo " Draft Product Created/Updated via products"
             jq . /tmp/draft-product.json
             exit 0
           fi
-          echo "⚠️  POST $EP2 returned $CODE"
+          echo "  POST $EP2 returned $CODE"
 
-          echo "➡️  Trying PUT $EP3"
+          echo "  Trying PUT $EP3"
           CODE=$(put_yaml "$EP3")
           if [[ "$CODE" == "200" || "$CODE" == "201" || "$CODE" == "204" ]]; then
-            echo "✅ Draft Product Updated via PUT"
+            echo " Draft Product Updated via PUT"
             jq . /tmp/draft-product.json || true
             exit 0
           fi
@@ -204,32 +204,32 @@ jobs:
           echo "Last response:"; cat /tmp/draft-product.json || true
           exit 1
 
-      # 🚀 Publish Product to Catalog
+      # Publish Product to Catalog
       - name: Publish Product to catalog (contains the API)
         if: ${{ github.event.inputs.product_file != '' }}
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           PUB_URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}/products?stage=true"
-          echo "🚀 Publishing Product to catalog: ${APIC_CATALOG}"
+          echo "Publishing Product to catalog: ${APIC_CATALOG}"
           curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
             -H "Content-Type: application/yaml" \
             --data-binary @"$PRODUCT_FILE" \
             "$PUB_URL" -o /tmp/publish.json
-          echo "✅ Product Published:"
+          echo " Product Published:"
           cat /tmp/publish.json | jq .
 
-      # 🚀 Publish API directly if no Product provided
+      # Publish API directly if no Product provided
       - name: Publish API directly (if no product)
         if: ${{ github.event.inputs.product_file == '' }}
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
           PUB_URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}/apis?stage=true"
-          echo "🚀 Publishing API directly to catalog: ${APIC_CATALOG}"
+          echo "Publishing API directly to catalog: ${APIC_CATALOG}"
           curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
             -H "Content-Type: application/yaml" \
             --data-binary @"${API_FILE}" \
             "$PUB_URL" -o /tmp/api-publish.json
-          echo "✅ API Published:"
+          echo " API Published:"
           cat /tmp/api-publish.json | jq .
