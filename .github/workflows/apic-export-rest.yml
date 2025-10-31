@@ -1,0 +1,93 @@
+name: APIC Export via REST
+on:
+  workflow_dispatch:
+    inputs:
+      api_name:
+        description: "API name to export (e.g., hello-proxy)"
+        default: "hello-proxy"
+        required: true
+      api_version:
+        description: "API version (e.g., 1.0.0)"
+        default: "1.0.0"
+        required: true
+      product_name:
+        description: "Product name (optional)"
+        default: "hello-product"
+        required: false
+      product_version:
+        description: "Product version (optional)"
+        default: "1.0.0"
+        required: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      APIC_BASE: ${{ secrets.APIC_BASE }}
+      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
+      APIC_ORG: ${{ secrets.APIC_ORG }}
+      APIC_CATALOG: ${{ secrets.APIC_CATALOG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Bearer token
+        id: token
+        run: |
+          set -euo pipefail
+          RESP=$(curl -fsS -X POST "${APIC_BASE}/api/token" \
+            -H 'Content-Type: application/json' \
+            --data "{\"username\":\"${APIC_USERNAME}\",\"password\":\"${APIC_PASSWORD}\"}")
+          ACCESS_TOKEN=$(echo "$RESP" | jq -r '.access_token // .token // empty')
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Token response was: $RESP"
+            echo "::error::Could not obtain access token"
+            exit 1
+          fi
+          echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Export draft API as YAML
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p export/apis export/products export/catalog
+          # Typical GET pattern:
+          #   GET /api/orgs/{org}/drafts/draft-apis/{name}:{version}?format=yaml
+          API_NAME="${{ github.event.inputs.api_name }}"
+          API_VER="${{ github.event.inputs.api_version }}"
+          GET_API_URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$GET_API_URL" -o "export/apis/${API_NAME}_${API_VER}.yaml"
+          echo "Saved export/apis/${API_NAME}_${API_VER}.yaml"
+          echo "----"; head -n 20 "export/apis/${API_NAME}_${API_VER}.yaml" || true
+
+      - name: Export draft Product as YAML (optional)
+        if: ${{ github.event.inputs.product_name != '' }}
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          PROD="${{ github.event.inputs.product_name }}"
+          PVER="${{ github.event.inputs.product_version }}"
+          GET_PROD_URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$GET_PROD_URL" -o "export/products/${PROD}_${PVER}.yaml"
+          echo "Saved export/products/${PROD}_${PVER}.yaml"
+          echo "----"; head -n 20 "export/products/${PROD}_${PVER}.yaml" || true
+
+      - name: Export catalog summary (for portability hints)
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Helpful metadata if you want to recreate the target catalog elsewhere
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}" \
+            -o export/catalog/${APIC_CATALOG}.json
+          jq '.' export/catalog/${APIC_CATALOG}.json | head -n 40
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apic-export
+          path: export/
