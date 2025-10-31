@@ -31,12 +31,18 @@ jobs:
       - name: Install APIC Toolkit
         run: |
           set -euo pipefail
-          # Toolkit is distributed as a tarball; use the Linux x64 build
-          curl -fsSL https://ibm-apiconnect-toolkit.s3.us.cloud-object-storage.appdomain.cloud/linux/apic-toolkit-linux.tgz \
+          echo "📦 Downloading IBM APIC Toolkit (Linux build)..."
+          curl -fsSL https://public.dhe.ibm.com/software/integration/apic/toolkit/v10-latest/apic-toolkit-linux.tgz \
             -o /tmp/apic.tgz
-          sudo tar -C /usr/local -xzf /tmp/apic.tgz
-          sudo ln -s /usr/local/apic/bin/apic /usr/local/bin/apic
+
+          echo "📂 Extracting..."
+          sudo mkdir -p /usr/local/apic
+          sudo tar -C /usr/local/apic -xzf /tmp/apic.tgz
+          sudo ln -sf /usr/local/apic/bin/apic /usr/local/bin/apic
+
+          echo "✅ Toolkit installed:"
           apic --version
+
 
       - name: Login to APIC
         run: |
