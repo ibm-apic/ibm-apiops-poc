@@ -1,0 +1,59 @@
+openapi: 3.0.0
+info:
+  title: hello-proxy
+  version: 1.0.0
+servers:
+  - url: https://example.com/hello
+paths:
+  /:
+    get:
+      summary: Echo through httpbin
+      operationId: getHello
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json: {}
+x-ibm-configuration:
+  enforced: true
+  phase: realized
+  gateway: datapower-api-gateway
+  type: rest
+  basePath: /hello
+  assembly:
+    execute:
+      - log:
+          title: log
+          mode: gather-only
+          message: "$(request.verb) $(api.operationPath)"
+      - parse:
+          title: parse-body
+          use-content-type: true
+          parse-settings-object: default
+          input: message
+          output: message
+      - map:
+          title: add-header
+          inputs:
+            - name: X-Demo-Policy
+              variable: request.body.X-Demo-Policy
+              type: string
+              default: ""
+          outputs:
+            - name: X-Demo-Policy
+              variable: message.body.X-Demo-Policy
+              type: string
+              value: active
+      - invoke:
+          title: call-upstream
+          verb: GET
+          target-url: https://httpbin.org/anything
+  catch: []
+  cors:
+    enabled: true
+    allow-origins:
+      - "*"
+    allow-methods:
+      - GET
+    allow-headers:
+      - "*"
