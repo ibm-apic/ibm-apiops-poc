@@ -36,81 +36,70 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 🔐 Reuse the working auth mode (basic or cookie)
+      # 🔐 Authenticate with APIC (basic/cookie) – keep this as you have it
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
           set -euo pipefail
           BASE="${APIC_BASE}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
-
-          # Try Basic
+          # Try basic
           if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
             exit 0
           fi
-
-          # Try Cookie
+          # Try cookie
           COOKIE=/tmp/apic_cookie.txt
-          code=$(curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
-                   -X POST "$BASE/login" -H 'Content-Type: application/json' \
-                   --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}")
-          if [ "$code" = "200" ] || [ "$code" = "204" ]; then
-            if [ "$(curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")" = "200" ]; then
-              echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
-              exit 0
-            fi
+          if curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
+               -X POST "$BASE/login" -H 'Content-Type: application/json' \
+               --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}" | grep -qE '^(200|204)$'; then
+            echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
+            exit 0
           fi
-          echo "::error::Auth failed. Check APIC_BASE/credentials."
-          exit 1
-
-      - name: Export API YAML
+          echo "::error::Auth failed"; exit 1
+        
+        # 📤 Export draft API as YAML
+      - name: Export draft API as YAML
         run: |
           set -euo pipefail
-          mkdir -p export/apis export/products
-
-          SCOPE="${{ github.event.inputs.scope }}"
-          API="${{ github.event.inputs.api_name }}"
-          VER="${{ github.event.inputs.api_version }}"
-
-          if [ "$SCOPE" = "catalog" ]; then
-            URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}/apis/${API}:${VER}?format=yaml"
-          else
-            URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API}:${VER}?format=yaml"
-          fi
-
-          echo "→ GET $URL"
-          if ! curl -fsS ${{ steps.auth.outputs.curl_auth }} \
-               -H "Accept: application/yaml" "$URL" \
-               -o "export/apis/${API}_${VER}.yaml"; then
-            echo "::error::API not found or not accessible at $URL"
-            exit 1
-          fi
-          echo "Saved export/apis/${API}_${VER}.yaml"
-          head -n 20 "export/apis/${API}_${VER}.yaml" || true
-
-      - name: Export Product YAML (optional)
+          mkdir -p export/apis
+          API_NAME="${{ github.event.inputs.api_name }}"
+          API_VER="${{ github.event.inputs.api_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          echo "GET $URL"
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/apis/${API_NAME}_${API_VER}.yaml"
+          file "export/apis/${API_NAME}_${API_VER}.yaml" || true
+          head -n 25 "export/apis/${API_NAME}_${API_VER}.yaml" || true
+        
+        # 📤 Export draft Product as YAML (optional)
+      - name: Export draft Product as YAML (optional)
         if: ${{ github.event.inputs.product_name != '' }}
         run: |
           set -euo pipefail
-          SCOPE="${{ github.event.inputs.scope }}"
+          mkdir -p export/products
           PROD="${{ github.event.inputs.product_name }}"
           PVER="${{ github.event.inputs.product_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          echo "GET $URL"
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/products/${PROD}_${PVER}.yaml"
+          file "export/products/${PROD}_${PVER}.yaml" || true
+          head -n 25 "export/products/${PROD}_${PVER}.yaml" || true
+        
+        # 📤 Export catalog summary (JSON only, compact)
+      - name: Export catalog summary (for portability hints)
+        run: |
+          set -euo pipefail
+          mkdir -p export/catalog
+          URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}"
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/json' \
+            "$URL" | jq '{name, title, gateway_service_urls, portal, space_admins, subscription_config}' \
+            > "export/catalog/${APIC_CATALOG}.json"
+          cat "export/catalog/${APIC_CATALOG}.json"
 
-          if [ "$SCOPE" = "catalog" ]; then
-            URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}/products/${PROD}:${PVER}?format=yaml"
-          else
-            URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
-          fi
-
-          echo "→ GET $URL"
-          if ! curl -fsS ${{ steps.auth.outputs.curl_auth }} \
-               -H "Accept: application/yaml" "$URL" \
-               -o "export/products/${PROD}_${PVER}.yaml"; then
-            echo "::error::Product not found or not accessible at $URL"
-            exit 1
-          fi
-          echo "Saved export/products/${PROD}_${PVER}.yaml"
-          head -n 20 "export/products/${PROD}_${PVER}.yaml" || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
