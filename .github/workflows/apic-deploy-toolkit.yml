@@ -1,0 +1,87 @@
+name: APIC Deploy via Toolkit
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_file:
+        description: "Path to API YAML"
+        default: "apis/hello-proxy.yaml"
+        required: true
+      product_file:
+        description: "Path to Product YAML"
+        default: "products/hello-product.yaml"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Example: https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      APIC_BASE:     ${{ secrets.APIC_BASE }}
+      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
+      APIC_ORG:      ${{ secrets.APIC_ORG }}       # e.g. try-ai
+      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}   # e.g. sandbox
+      # Most trial tenants use the default provider realm below; adjust if you changed it
+      APIC_REALM:    provider/default-idp-2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install APIC Toolkit
+        run: |
+          set -euo pipefail
+          # Toolkit is distributed as a tarball; use the Linux x64 build
+          curl -fsSL https://ibm-apiconnect-toolkit.s3.us.cloud-object-storage.appdomain.cloud/linux/apic-toolkit-linux.tgz \
+            -o /tmp/apic.tgz
+          sudo tar -C /usr/local -xzf /tmp/apic.tgz
+          sudo ln -s /usr/local/apic/bin/apic /usr/local/bin/apic
+          apic --version
+
+      - name: Login to APIC
+        run: |
+          set -euo pipefail
+          # Use the Manager URL as the server
+          apic login \
+            --server "${APIC_BASE}" \
+            --username "${APIC_USERNAME}" \
+            --password "${APIC_PASSWORD}" \
+            --realm "${APIC_REALM}" \
+            --accept-license
+
+      - name: Push draft API
+        run: |
+          set -euo pipefail
+          API_FILE="${{ github.event.inputs.api_file }}"
+          apic drafts:apis:create "${API_FILE}" \
+            --server "${APIC_BASE}" \
+            --org "${APIC_ORG}" \
+            --accept-license || \
+          apic drafts:apis:update "${API_FILE}" \
+            --server "${APIC_BASE}" \
+            --org "${APIC_ORG}" \
+            --accept-license
+
+      - name: Push draft Product
+        run: |
+          set -euo pipefail
+          PRODUCT_FILE="${{ github.event.inputs.product_file }}"
+          apic drafts:products:create "${PRODUCT_FILE}" \
+            --server "${APIC_BASE}" \
+            --org "${APIC_ORG}" \
+            --accept-license || \
+          apic drafts:products:update "${PRODUCT_FILE}" \
+            --server "${APIC_BASE}" \
+            --org "${APIC_ORG}" \
+            --accept-license
+
+      - name: Publish product to catalog
+        run: |
+          set -euo pipefail
+          PRODUCT_FILE="${{ github.event.inputs.product_file }}"
+          apic products:publish "${PRODUCT_FILE}" \
+            --server "${APIC_BASE}" \
+            --org "${APIC_ORG}" \
+            --catalog "${APIC_CATALOG}" \
+            --stage \
+            --accept-license
