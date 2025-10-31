@@ -88,27 +88,37 @@ jobs:
           file "export/products/${PROD}_${PVER}.yaml" || true
           head -n 25 "export/products/${PROD}_${PVER}.yaml" || true
         
-      - name: Export catalog summary (JSON) for portability hints
+      - name: Export catalog summary (for portability hints)
         run: |
           set -euo pipefail
-          META="export/catalog/${APIC_CATALOG}.json"
-          URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}"
-
-          # capture headers to verify JSON
-          HDR=/tmp/hdr.txt
-          curl -sS -D "$HDR" -o "$META" ${{ steps.auth.outputs.curl_auth }} "$URL" || {
-            echo "::warning::Catalog summary fetch failed."
-            exit 0
-          }
-
-          if grep -i "content-type: application/json" "$HDR" >/dev/null; then
-            echo "✅ Catalog JSON saved at $META"
-            head -n 40 "$META" | sed 's/./&/g' | head -n 40 >/dev/null  # noop to keep step short
-            jq '.' "$META" | head -n 40
-          else
-            echo "::warning::Response was not JSON (likely HTML). Skipping jq pretty-print."
-            head -n 20 "$META" || true
+          mkdir -p export/catalog
+      
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/catalogs/${APIC_CATALOG}"
+      
+          # Fetch and capture headers + body
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/json' \
+            -D /tmp/cat.h \
+            -o "export/catalog/${APIC_CATALOG}.raw.json" \
+            "$URL"
+      
+          # Ensure we actually got JSON (not an HTML page)
+          if ! grep -i '^content-type:.*application/json' /tmp/cat.h >/dev/null; then
+            echo "::error::Catalog endpoint did not return JSON. Check URL or auth."
+            echo "----- response preview -----"
+            head -c 400 "export/catalog/${APIC_CATALOG}.raw.json" || true
+            echo
+            exit 1
           fi
+      
+          # Trim to just the useful bits
+          jq '{name, title, gateway_endpoints: .settings.gateway_endpoints, portal, space_admins, subscription_config}' \
+            "export/catalog/${APIC_CATALOG}.raw.json" \
+            > "export/catalog/${APIC_CATALOG}.json"
+      
+          rm -f "export/catalog/${APIC_CATALOG}.raw.json"
+          cat "export/catalog/${APIC_CATALOG}.json"
+
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
