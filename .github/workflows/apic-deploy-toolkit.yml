@@ -43,17 +43,16 @@ jobs:
 
 
 
-
       - name: Login to APIC
         run: |
           set -euo pipefail
-          # Use the Manager URL as the server
-          apic login \
+          ${{ steps.toolkit.outputs.apic_cmd }} login \
             --server "${APIC_BASE}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
             --realm "${APIC_REALM}" \
             --accept-license
+
 
       - name: Push draft API
         run: |
