@@ -34,6 +34,7 @@ jobs:
           echo "🔐 Logging into IBM Cloud Container Registry (ICR)..."
           echo "${{ secrets.IBM_CLOUD_API_KEY }}" | docker login icr.io -u iamapikey --password-stdin
 
+
       - name: Use APIC Toolkit via Docker
         id: toolkit
         run: |
