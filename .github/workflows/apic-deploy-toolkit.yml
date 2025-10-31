@@ -38,32 +38,18 @@ jobs:
           done
           [ -n "${{ secrets.IBM_ENTITLEMENT_KEY }}" ] || { echo "::error::Missing secret IBM_ENTITLEMENT_KEY"; exit 1; }
 
-      - name: Authenticate to IBM Entitled Registry (cp.icr.io)
-        run: |
-          echo "${{ secrets.IBM_ENTITLEMENT_KEY }}" \
-            | docker login cp.icr.io -u cp --password-stdin
-
-      - name: Pull Toolkit image and prepare wrapper
-        id: toolkit
+      - name: Install APIC Toolkit (public tarball)
         run: |
           set -euo pipefail
-          echo "Pulling $TOOLKIT_IMAGE..."
-          docker pull "$TOOLKIT_IMAGE"
+          echo "📦 Downloading IBM API Connect Toolkit..."
+          curl -fsSL \
+            https://apic-github-files.s3.eu.cloud-object-storage.appdomain.cloud/toolkit/10.0.8.0/apic-toolkit-linux.tgz \
+            -o /tmp/apic-toolkit.tgz
+          sudo mkdir -p /usr/local/apic
+          sudo tar -xzf /tmp/apic-toolkit.tgz -C /usr/local/apic
+          sudo ln -s /usr/local/apic/apic /usr/local/bin/apic
+          apic version
 
-          # Persist APIC CLI state (tokens, profiles) across steps
-          APIC_HOME="${RUNNER_TEMP}/apic_home"
-          mkdir -p "$APIC_HOME"
-
-          # Reusable wrapper to run 'apic' inside the container
-          # - Mount workspace at /work
-          # - Mount APIC_HOME to /root to persist login/session
-          echo "apic_cmd=docker run --rm \
-            -v \"$PWD\":/work -w /work \
-            -v \"$APIC_HOME\":/root \
-            \"$TOOLKIT_IMAGE\" apic" >> "$GITHUB_OUTPUT"
-
-          # Sanity check
-          ${{ steps.toolkit.outputs.apic_cmd }} version
 
       - name: Login to APIC
         run: |
