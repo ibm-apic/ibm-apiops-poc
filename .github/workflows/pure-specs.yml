@@ -1,0 +1,159 @@
+name: APIC Export via REST (clean)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_name:
+        description: "Draft API name, e.g. hello-proxyy"
+        default: "hello-proxyy"
+        required: true
+      api_version:
+        description: "Draft API version"
+        default: "1.0.0"
+        required: true
+      product_name:
+        description: "Draft Product name (optional)"
+        default: "hello-productt"
+        required: false
+      product_version:
+        description: "Draft Product version (optional)"
+        default: "1.0.0"
+        required: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      APIC_BASE:     ${{ secrets.APIC_BASE }}
+      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
+      APIC_ORG:      ${{ secrets.APIC_ORG }}
+      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Auth (basic or cookie) ---
+      - name: Get APIC auth (basic/cookie)
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${APIC_BASE}"
+          USER="${APIC_USERNAME}"
+          PASS="${APIC_PASSWORD}"
+
+          # Try Basic
+          if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
+            echo "mode=basic" >> $GITHUB_OUTPUT
+            # NOTE: curl_auth must be echoed as a single token to be expanded by bash later
+            echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Try Cookie
+          COOKIE=/tmp/apic_cookie.txt
+          code=$(curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
+                  -X POST "$BASE/login" -H 'Content-Type: application/json' \
+                  --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}")
+          if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+            if [ "$(curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")" = "200" ]; then
+              echo "mode=cookie" >> $GITHUB_OUTPUT
+              echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          echo "::error::Auth failed. Check APIC_BASE / credentials."
+          exit 1
+
+      - name: Install yq & jq
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          sudo apt-get update -y && sudo apt-get install -y jq
+          yq --version; jq --version
+
+      - name: Prepare folders
+        run: |
+          mkdir -p export/apis export/products export/catalog
+
+      # --- Export Draft API as YAML (raw, no HTML) ---
+      - name: Export draft API (RAW YAML)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="${{ github.event.inputs.api_name }}"
+          VER="${{ github.event.inputs.api_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API}:${VER}?format=yaml"
+
+          # Use the previously detected auth and *insist* on YAML
+          eval curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/apis/${API}_${VER}.yaml"
+
+          echo "Saved export/apis/${API}_${VER}.yaml"
+          head -n 20 "export/apis/${API}_${VER}.yaml" || true
+
+      # --- (Optional) Export Draft Product as YAML ---
+      - name: Export draft Product (RAW YAML)
+        if: ${{ github.event.inputs.product_name != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROD="${{ github.event.inputs.product_name }}"
+          PVER="${{ github.event.inputs.product_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+
+          eval curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/products/${PROD}_${PVER}.yaml"
+
+          echo "Saved export/products/${PROD}_${PVER}.yaml"
+          head -n 20 "export/products/${PROD}_${PVER}.yaml" || true
+
+      # --- (Optional) Minimal product YAML (keep only the wanted keys) ---
+      - name: Reduce product to minimal fields
+        if: ${{ github.event.inputs.product_name != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROD="${{ github.event.inputs.product_name }}"
+          PVER="${{ github.event.inputs.product_version }}"
+          SRC="export/products/${PROD}_${PVER}.yaml"
+          DST="export/products/${PROD}_${PVER}.minimal.yaml"
+
+          yq '
+            {
+              info:       .info,
+              gateways:   .gateways,
+              plans:      .plans,
+              apis:       .apis,
+              visibility: .visibility,
+              product:    .product
+            }
+          ' "$SRC" > "$DST"
+
+          echo "Minimal product spec at $DST"
+          cat "$DST"
+
+      # --- Catalog summary (JSON, not HTML) ---
+      - name: Export catalog summary JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="${APIC_BASE}/api/catalogs/${APIC_ORG}/${APIC_CATALOG}"
+          eval curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/json' \
+            "$URL" -o "export/catalog/${APIC_CATALOG}.json"
+
+          # Show just a few important fields
+          jq '{name, title, gateway_service_urls, portal, space_admins, subscription_config}' \
+            "export/catalog/${APIC_CATALOG}.json" | tee "export/catalog/${APIC_CATALOG}.minimal.json"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apic-export-clean
+          path: export/
