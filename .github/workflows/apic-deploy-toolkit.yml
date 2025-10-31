@@ -15,86 +15,91 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     env:
-      # Example: https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      # Example: https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_BASE:     ${{ secrets.APIC_BASE }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG:      ${{ secrets.APIC_ORG }}       # e.g. try-ai
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}   # e.g. sandbox
-      # Most trial tenants use the default provider realm below; adjust if you changed it
-      APIC_REALM:    provider/default-idp-2
+      APIC_REALM:    provider/default-idp-2        # adjust if your realm differs
+      TOOLKIT_IMAGE: cp.icr.io/cp/apic/toolkit:10.0.8.0
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to IBM Entitled Registry
+      - name: Guard required secrets
         run: |
-          echo "${{ secrets.IBM_ENTITLEMENT_KEY }}" | docker login cp.icr.io -u cp --password-stdin
+          set -euo pipefail
+          for v in APIC_BASE APIC_USERNAME APIC_PASSWORD APIC_ORG APIC_CATALOG; do
+            [ -n "${!v:-}" ] || { echo "::error::Missing env $v"; exit 1; }
+          done
+          [ -n "${{ secrets.IBM_ENTITLEMENT_KEY }}" ] || { echo "::error::Missing secret IBM_ENTITLEMENT_KEY"; exit 1; }
 
-      - name: Pull APIC Toolkit image
+      - name: Authenticate to IBM Entitled Registry (cp.icr.io)
         run: |
-          docker pull cp.icr.io/cp/apic/toolkit:10.0.8.0
-          docker run --rm cp.icr.io/cp/apic/toolkit:10.0.8.0 apic version
+          echo "${{ secrets.IBM_ENTITLEMENT_KEY }}" \
+            | docker login cp.icr.io -u cp --password-stdin
 
+      - name: Pull Toolkit image and prepare wrapper
+        id: toolkit
+        run: |
+          set -euo pipefail
+          echo "Pulling $TOOLKIT_IMAGE..."
+          docker pull "$TOOLKIT_IMAGE"
 
+          # Persist APIC CLI state (tokens, profiles) across steps
+          APIC_HOME="${RUNNER_TEMP}/apic_home"
+          mkdir -p "$APIC_HOME"
 
-      # - name: Use APIC Toolkit via Docker
-      #   id: toolkit
-      #   run: |
-      #     set -euo pipefail
-      #     echo "🐳 Pulling IBM API Connect Toolkit container..."
-      #     docker pull icr.io/ibm-apiconnect/toolkit:10.0.8.0
+          # Reusable wrapper to run 'apic' inside the container
+          # - Mount workspace at /work
+          # - Mount APIC_HOME to /root to persist login/session
+          echo "apic_cmd=docker run --rm \
+            -v \"$PWD\":/work -w /work \
+            -v \"$APIC_HOME\":/root \
+            \"$TOOLKIT_IMAGE\" apic" >> "$GITHUB_OUTPUT"
 
-      #     echo "✅ Toolkit image ready:"
-      #     docker run --rm icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic --version
-
-      #     # Store wrapper for reuse
-      #     echo "apic_cmd=docker run --rm -v $PWD:/work -w /work icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic" >> $GITHUB_OUTPUT
-
+          # Sanity check
+          ${{ steps.toolkit.outputs.apic_cmd }} version
 
       - name: Login to APIC
         run: |
           set -euo pipefail
           ${{ steps.toolkit.outputs.apic_cmd }} login \
-            --server "${APIC_BASE}" \
+            --server  "${APIC_BASE}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
-            --realm "${APIC_REALM}" \
+            --realm    "${APIC_REALM}" \
             --accept-license
 
-
-      - name: Push draft API
+      - name: Push draft API (create or update)
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          apic drafts:apis:create "${API_FILE}" \
-            --server "${APIC_BASE}" \
-            --org "${APIC_ORG}" \
-            --accept-license || \
-          apic drafts:apis:update "${API_FILE}" \
-            --server "${APIC_BASE}" \
-            --org "${APIC_ORG}" \
-            --accept-license
+          # Try create, fall back to update
+          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:create "${API_FILE}" \
+                --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
+            ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:update "${API_FILE}" \
+                --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
+          fi
 
-      - name: Push draft Product
+      - name: Push draft Product (create or update)
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          apic drafts:products:create "${PRODUCT_FILE}" \
-            --server "${APIC_BASE}" \
-            --org "${APIC_ORG}" \
-            --accept-license || \
-          apic drafts:products:update "${PRODUCT_FILE}" \
-            --server "${APIC_BASE}" \
-            --org "${APIC_ORG}" \
-            --accept-license
+          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:create "${PRODUCT_FILE}" \
+                --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
+            ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:update "${PRODUCT_FILE}" \
+                --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
+          fi
 
-      - name: Publish product to catalog
+      - name: Publish product to catalog (stage)
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          apic products:publish "${PRODUCT_FILE}" \
+          ${{ steps.toolkit.outputs.apic_cmd }} products:publish "${PRODUCT_FILE}" \
             --server "${APIC_BASE}" \
             --org "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
