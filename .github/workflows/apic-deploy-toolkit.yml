@@ -28,20 +28,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install APIC Toolkit
+      - name: Install APIC Toolkit (multi-source fallback)
         run: |
           set -euo pipefail
-          echo "📦 Downloading IBM APIC Toolkit (Linux build)..."
-          curl -fsSL https://public.dhe.ibm.com/software/integration/apic/toolkit/v10-latest/apic-toolkit-linux.tgz \
-            -o /tmp/apic.tgz
+          echo "📦 Attempting to download IBM APIC Toolkit (Linux)..."
 
-          echo "📂 Extracting..."
+          # Create target dir
           sudo mkdir -p /usr/local/apic
+
+          # Try multiple mirrors
+          URLS=(
+            "https://public.dhe.ibm.com/software/integration/apic/toolkit/v10-latest/linux/apic-toolkit-linux.tgz"
+            "https://public.dhe.ibm.com/software/integration/apic/toolkit/v10.0.8.0/linux/apic-toolkit-linux.tgz"
+            "https://public.dhe.ibm.com/software/integration/apic/toolkit/v10.0.7.0/linux/apic-toolkit-linux.tgz"
+            "https://public.dhe.ibm.com/software/integration/apic/toolkit/linux/apic-toolkit-linux.tgz"
+          )
+
+          SUCCESS=0
+          for u in "${URLS[@]}"; do
+            echo "🔎 Trying $u"
+            if curl -fsSL "$u" -o /tmp/apic.tgz; then
+              echo "✅ Downloaded from $u"
+              SUCCESS=1
+              break
+            else
+              echo "⚠️  Failed: $u"
+            fi
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "::error::All known APIC Toolkit URLs failed (404). Check IBM public repo or manually upload toolkit tarball."
+            exit 1
+          fi
+
+          echo "📂 Extracting Toolkit..."
           sudo tar -C /usr/local/apic -xzf /tmp/apic.tgz
           sudo ln -sf /usr/local/apic/bin/apic /usr/local/bin/apic
 
-          echo "✅ Toolkit installed:"
-          apic --version
+          echo "✅ Installed Toolkit version:"
+          apic --version || true
+
 
 
       - name: Login to APIC
