@@ -16,7 +16,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      APIC_BASE: ${{ secrets.APIC_BASE }}        # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      APIC_BASE: ${{ secrets.APIC_BASE }}        # e.g. https://<env>.../manager
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG: ${{ secrets.APIC_ORG }}          # e.g. try-ai
@@ -71,34 +71,138 @@ jobs:
           echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE/credentials."
           exit 1
 
-      # 🧩 Create or Update Draft API
-      - name: Create/Update Draft API
+      - name: Install yq (YAML parser)
+        run: |
+          set -euo pipefail
+          VERSION="v4.44.3"
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_linux_amd64" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+      # 🧩 Create/Update Draft API (tries both endpoint shapes + PUT fallback)
+      - name: Create/Update Draft API (with fallbacks)
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          CREATE_URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
-          echo "📦 Deploying API Draft: $API_FILE"
-          curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
-            -H "Content-Type: application/yaml" \
-            --data-binary @"$API_FILE" \
-            "$CREATE_URL" -o /tmp/draft-api.json
-          echo "✅ Draft API Created/Updated:"
-          cat /tmp/draft-api.json | jq .
+          NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
+          VER=$(yq -r '.info.version' "$API_FILE")
+          echo "📦 API file: $API_FILE"
+          echo "🔖 Parsed name: $NAME, version: $VER"
 
-      # 📦 Create or Update Draft Product (if provided)
-      - name: Create/Update Draft Product (optional)
+          EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
+          EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis?replace=true"
+          EP3="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis/${NAME}:${VER}"
+
+          post_yaml() {
+            local url="$1"
+            curl -sk -o /tmp/draft-api.json -w "%{http_code}" \
+              -X POST ${{ steps.auth.outputs.curl_auth }} \
+              -H "Content-Type: application/yaml" \
+              --data-binary @"$API_FILE" \
+              "$url"
+          }
+
+          put_yaml() {
+            local url="$1"
+            curl -sk -o /tmp/draft-api.json -w "%{http_code}" \
+              -X PUT ${{ steps.auth.outputs.curl_auth }} \
+              -H "Content-Type: application/yaml" \
+              --data-binary @"$API_FILE" \
+              "$url"
+          }
+
+          echo "➡️  Trying POST $EP1"
+          CODE=$(post_yaml "$EP1")
+          if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
+            echo "✅ Draft API Created/Updated via draft-apis"
+            jq . /tmp/draft-api.json
+            exit 0
+          fi
+          echo "⚠️  POST $EP1 returned $CODE"
+
+          echo "➡️  Trying POST $EP2"
+          CODE=$(post_yaml "$EP2")
+          if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
+            echo "✅ Draft API Created/Updated via apis"
+            jq . /tmp/draft-api.json
+            exit 0
+          fi
+          echo "⚠️  POST $EP2 returned $CODE"
+
+          echo "➡️  Trying PUT $EP3"
+          CODE=$(put_yaml "$EP3")
+          if [[ "$CODE" == "200" || "$CODE" == "201" || "$CODE" == "204" ]]; then
+            echo "✅ Draft API Updated via PUT"
+            jq . /tmp/draft-api.json || true
+            exit 0
+          fi
+
+          echo "::error::All draft API endpoints failed (last code: $CODE)."
+          echo "Last response:"; cat /tmp/draft-api.json || true
+          exit 1
+
+      # 📦 Create/Update Draft Product (tries both endpoint shapes + PUT fallback)
+      - name: Create/Update Draft Product (optional, with fallbacks)
         if: ${{ github.event.inputs.product_file != '' }}
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          CREATE_URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products?replace=true"
-          echo "📦 Deploying Product Draft: $PRODUCT_FILE"
-          curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
-            -H "Content-Type: application/yaml" \
-            --data-binary @"$PRODUCT_FILE" \
-            "$CREATE_URL" -o /tmp/draft-product.json
-          echo "✅ Draft Product Created/Updated:"
-          cat /tmp/draft-product.json | jq .
+          NAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
+          VER=$(yq -r '.info.version' "$PRODUCT_FILE")
+          echo "📦 Product file: $PRODUCT_FILE"
+          echo "🔖 Parsed name: $NAME, version: $VER"
+
+          EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products?replace=true"
+          EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/products?replace=true"
+          EP3="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/products/${NAME}:${VER}"
+
+          post_yaml() {
+            local url="$1"
+            curl -sk -o /tmp/draft-product.json -w "%{http_code}" \
+              -X POST ${{ steps.auth.outputs.curl_auth }} \
+              -H "Content-Type: application/yaml" \
+              --data-binary @"$PRODUCT_FILE" \
+              "$url"
+          }
+
+          put_yaml() {
+            local url="$1"
+            curl -sk -o /tmp/draft-product.json -w "%{http_code}" \
+              -X PUT ${{ steps.auth.outputs.curl_auth }} \
+              -H "Content-Type: application/yaml" \
+              --data-binary @"$PRODUCT_FILE" \
+              "$url"
+          }
+
+          echo "➡️  Trying POST $EP1"
+          CODE=$(post_yaml "$EP1")
+          if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
+            echo "✅ Draft Product Created/Updated via draft-products"
+            jq . /tmp/draft-product.json
+            exit 0
+          fi
+          echo "⚠️  POST $EP1 returned $CODE"
+
+          echo "➡️  Trying POST $EP2"
+          CODE=$(post_yaml "$EP2")
+          if [[ "$CODE" == "200" || "$CODE" == "201" ]]; then
+            echo "✅ Draft Product Created/Updated via products"
+            jq . /tmp/draft-product.json
+            exit 0
+          fi
+          echo "⚠️  POST $EP2 returned $CODE"
+
+          echo "➡️  Trying PUT $EP3"
+          CODE=$(put_yaml "$EP3")
+          if [[ "$CODE" == "200" || "$CODE" == "201" || "$CODE" == "204" ]]; then
+            echo "✅ Draft Product Updated via PUT"
+            jq . /tmp/draft-product.json || true
+            exit 0
+          fi
+
+          echo "::error::All draft Product endpoints failed (last code: $CODE)."
+          echo "Last response:"; cat /tmp/draft-product.json || true
+          exit 1
 
       # 🚀 Publish Product to Catalog
       - name: Publish Product to catalog (contains the API)
