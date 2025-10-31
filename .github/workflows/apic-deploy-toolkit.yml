@@ -24,7 +24,8 @@ jobs:
       APIC_ORG:      ${{ secrets.APIC_ORG }}       # e.g. try-ai
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}   # e.g. sandbox
       APIC_REALM:    provider/default-idp-2        # adjust if your realm differs
-      TOOLKIT_IMAGE: cp.icr.io/cp/apic/toolkit:10.0.8.0
+      TOOLKIT_IMAGE: cp.icr.io/cp/apic/apic-toolkit:10.0.8.0
+
 
     steps:
       - uses: actions/checkout@v4
