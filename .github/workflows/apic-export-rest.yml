@@ -34,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 🔐 Authenticate with APIC (Basic or Cookie mode)
+      # Authenticate with APIC (Basic or Cookie mode)
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
@@ -43,17 +43,17 @@ jobs:
           USER="${APIC_USERNAME}"
           PASS="${APIC_PASSWORD}"
 
-          echo "🔎 Checking Basic authentication..."
+          echo "  Checking Basic authentication..."
           STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -u "$USER:$PASS" "$BASE/api/orgs")
           if [ "$STATUS" = "200" ]; then
-            echo "✅ Using Basic authentication"
+            echo " Using Basic authentication"
             echo "mode=basic" >> $GITHUB_OUTPUT
             # store a reusable curl auth snippet
             printf "curl_auth=-u '%s:%s'\n" "$USER" "$PASS" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "🔎 Trying Cookie-based authentication..."
+          echo "  Trying Cookie-based authentication..."
           COOKIE=/tmp/apic_cookie.txt
           LOGIN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
             -c "$COOKIE" -b "$COOKIE" \
@@ -64,7 +64,7 @@ jobs:
           if [ "$LOGIN_STATUS" = "200" ] || [ "$LOGIN_STATUS" = "204" ]; then
             STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")
             if [ "$STATUS" = "200" ]; then
-              echo "✅ Using Cookie authentication"
+              echo " Using Cookie authentication"
               echo "mode=cookie" >> $GITHUB_OUTPUT
               echo "cookie_path=$COOKIE" >> $GITHUB_OUTPUT
               echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
@@ -91,12 +91,12 @@ jobs:
 
           try_get() {
             local url="$1"
-            echo "➡️  GET $url"
+            echo "GET $url"
             # -f to fail on >=400; Accept header for YAML
             if curl -fsS ${{ steps.auth.outputs.curl_auth }} \
                  -H "Accept: application/yaml" \
                  -o "$OUT" "$url"; then
-              echo "✅ Saved $OUT"
+              echo " Saved $OUT"
               head -n 20 "$OUT" || true
               return 0
             fi
@@ -124,11 +124,11 @@ jobs:
 
           try_get() {
             local url="$1"
-            echo "➡️  GET $url"
+            echo " GET $url"
             if curl -fsS ${{ steps.auth.outputs.curl_auth }} \
                  -H "Accept: application/yaml" \
                  -o "$OUT" "$url"; then
-              echo "✅ Saved $OUT"
+              echo " Saved $OUT"
               head -n 20 "$OUT" || true
               return 0
             fi
@@ -156,7 +156,7 @@ jobs:
           }
 
           if grep -i "content-type: application/json" "$HDR" >/dev/null; then
-            echo "✅ Catalog JSON saved at $META"
+            echo " Catalog JSON saved at $META"
             head -n 40 "$META" | sed 's/./&/g' | head -n 40 >/dev/null  # noop to keep step short
             jq '.' "$META" | head -n 40
           else
