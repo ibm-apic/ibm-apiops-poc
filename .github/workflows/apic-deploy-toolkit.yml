@@ -28,25 +28,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to IBM Container Registry (ICR)
+      - name: Authenticate to IBM Entitled Registry
         run: |
-          set -euo pipefail
-          echo "🔐 Logging into IBM Cloud Container Registry (ICR)..."
-          echo "${{ secrets.IBM_CLOUD_API_KEY }}" | docker login icr.io -u iamapikey --password-stdin
+          echo "${{ secrets.IBM_ENTITLEMENT_KEY }}" | docker login cp.icr.io -u cp --password-stdin
 
-
-      - name: Use APIC Toolkit via Docker
-        id: toolkit
+      - name: Pull APIC Toolkit image
         run: |
-          set -euo pipefail
-          echo "🐳 Pulling IBM API Connect Toolkit container..."
-          docker pull icr.io/ibm-apiconnect/toolkit:10.0.8.0
+          docker pull cp.icr.io/cp/apic/toolkit:10.0.8.0
+          docker run --rm cp.icr.io/cp/apic/toolkit:10.0.8.0 apic version
 
-          echo "✅ Toolkit image ready:"
-          docker run --rm icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic --version
 
-          # Store wrapper for reuse
-          echo "apic_cmd=docker run --rm -v $PWD:/work -w /work icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic" >> $GITHUB_OUTPUT
+
+      # - name: Use APIC Toolkit via Docker
+      #   id: toolkit
+      #   run: |
+      #     set -euo pipefail
+      #     echo "🐳 Pulling IBM API Connect Toolkit container..."
+      #     docker pull icr.io/ibm-apiconnect/toolkit:10.0.8.0
+
+      #     echo "✅ Toolkit image ready:"
+      #     docker run --rm icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic --version
+
+      #     # Store wrapper for reuse
+      #     echo "apic_cmd=docker run --rm -v $PWD:/work -w /work icr.io/ibm-apiconnect/toolkit:10.0.8.0 apic" >> $GITHUB_OUTPUT
 
 
       - name: Login to APIC
