@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 🔐 Authenticate with APIC (basic/cookie) – keep this as you have it
+      # Authenticate with APIC (basic/cookie) – keep this as you have it
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
@@ -57,7 +57,7 @@ jobs:
           fi
           echo "::error::Auth failed"; exit 1
         
-        # 📤 Export draft API as YAML
+        #  Export draft API as YAML
       - name: Export draft API as YAML
         run: |
           set -euo pipefail
@@ -72,7 +72,7 @@ jobs:
           file "export/apis/${API_NAME}_${API_VER}.yaml" || true
           head -n 25 "export/apis/${API_NAME}_${API_VER}.yaml" || true
         
-        # 📤 Export draft Product as YAML (optional)
+        #  Export draft Product as YAML (optional)
       - name: Export draft Product as YAML (optional)
         if: ${{ github.event.inputs.product_name != '' }}
         run: |
