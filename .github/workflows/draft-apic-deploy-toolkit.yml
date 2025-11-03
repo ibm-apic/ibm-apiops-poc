@@ -59,16 +59,16 @@ jobs:
             "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
           )
         
-          echo "🔎 Trying to download IBM API Connect Toolkit from public mirrors…"
+          echo "Trying to download IBM API Connect Toolkit from public mirrors…"
           SUCCESS=""
           for URL in "${CANDIDATES[@]}"; do
-            echo "➡️  GET $URL"
+            echo " GET $URL"
             if curl -fsS -o apic-toolkit.tgz "$URL"; then
-              echo "✅ Downloaded from: $URL"
+              echo " Downloaded from: $URL"
               SUCCESS="$URL"
               break
             else
-              echo "⚠️  Failed: $URL"
+              echo "Failed: $URL"
             fi
           done
         
@@ -92,7 +92,7 @@ jobs:
             exit 1
           fi
         
-          echo "🔍 apic version:"
+          echo "apic version:"
           apic version
     
 
