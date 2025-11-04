@@ -38,63 +38,71 @@ jobs:
           done
           [ -n "${{ secrets.IBM_ENTITLEMENT_KEY }}" ] || { echo "::error::Missing secret IBM_ENTITLEMENT_KEY"; exit 1; }
 
-      - name: Install APIC Toolkit (public tarball with fallbacks)
+      # - name: Install APIC Toolkit (public tarball with fallbacks)
+      #   run: |
+      #     set -euo pipefail
+        
+      #     mkdir -p /tmp/apic-tk
+      #     cd /tmp/apic-tk
+        
+      #     # Candidate mirrors & versions (most common public COS buckets + a version fallback)
+      #     CANDIDATES=(
+      #       # 10.0.8.0 (primary)
+      #       "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
+      #       # 10.0.7.0 (fallback)
+      #       "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
+      #       "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
+      #     )
+        
+      #     echo "Trying to download IBM API Connect Toolkit from public mirrors…"
+      #     SUCCESS=""
+      #     for URL in "${CANDIDATES[@]}"; do
+      #       echo " GET $URL"
+      #       if curl -fsS -o apic-toolkit.tgz "$URL"; then
+      #         echo " Downloaded from: $URL"
+      #         SUCCESS="$URL"
+      #         break
+      #       else
+      #         echo "Failed: $URL"
+      #       fi
+      #     done
+        
+      #     if [ -z "$SUCCESS" ]; then
+      #       echo "::error::Could not download APIC Toolkit from known public mirrors (HTTP 404)."
+      #       echo "If you have IBM Entitled Registry access, switch to cp.icr.io image pulls instead."
+      #       exit 1
+      #     fi
+        
+      #     # Install
+      #     sudo mkdir -p /usr/local/apic-toolkit
+      #     sudo tar -xzf apic-toolkit.tgz -C /usr/local/apic-toolkit
+      #     # The tar usually contains a single 'apic' binary; link it into PATH
+      #     if [ -x /usr/local/apic-toolkit/apic ]; then
+      #       sudo ln -sf /usr/local/apic-toolkit/apic /usr/local/bin/apic
+      #     elif [ -x /usr/local/apic-toolkit/bin/apic ]; then
+      #       sudo ln -sf /usr/local/apic-toolkit/bin/apic /usr/local/bin/apic
+      #     else
+      #       echo "::error::Installed toolkit did not contain 'apic' in expected location."
+      #       ls -la /usr/local/apic-toolkit || true
+      #       exit 1
+      #     fi
+        
+      #     echo "apic version:"
+      #     apic version
+    
+      - name: Install APIC Toolkit
         run: |
           set -euo pipefail
-        
-          mkdir -p /tmp/apic-tk
-          cd /tmp/apic-tk
-        
-          # Candidate mirrors & versions (most common public COS buckets + a version fallback)
-          CANDIDATES=(
-            # 10.0.8.0 (primary)
-            "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-            # 10.0.7.0 (fallback)
-            "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-            "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-          )
-        
-          echo "Trying to download IBM API Connect Toolkit from public mirrors…"
-          SUCCESS=""
-          for URL in "${CANDIDATES[@]}"; do
-            echo " GET $URL"
-            if curl -fsS -o apic-toolkit.tgz "$URL"; then
-              echo " Downloaded from: $URL"
-              SUCCESS="$URL"
-              break
-            else
-              echo "Failed: $URL"
-            fi
-          done
-        
-          if [ -z "$SUCCESS" ]; then
-            echo "::error::Could not download APIC Toolkit from known public mirrors (HTTP 404)."
-            echo "If you have IBM Entitled Registry access, switch to cp.icr.io image pulls instead."
-            exit 1
-          fi
-        
-          # Install
-          sudo mkdir -p /usr/local/apic-toolkit
-          sudo tar -xzf apic-toolkit.tgz -C /usr/local/apic-toolkit
-          # The tar usually contains a single 'apic' binary; link it into PATH
-          if [ -x /usr/local/apic-toolkit/apic ]; then
-            sudo ln -sf /usr/local/apic-toolkit/apic /usr/local/bin/apic
-          elif [ -x /usr/local/apic-toolkit/bin/apic ]; then
-            sudo ln -sf /usr/local/apic-toolkit/bin/apic /usr/local/bin/apic
-          else
-            echo "::error::Installed toolkit did not contain 'apic' in expected location."
-            ls -la /usr/local/apic-toolkit || true
-            exit 1
-          fi
-        
-          echo "apic version:"
-          apic version
-    
+          echo "📦 Installing IBM API Connect Toolkit..."
+          mkdir -p /usr/local/apic
+          tar -xzf toolkit/toolkit-linux.tgz -C /usr/local/apic
+          sudo ln -s /usr/local/apic/apic /usr/local/bin/apic
+          apic --version
 
 
       - name: Login to APIC
