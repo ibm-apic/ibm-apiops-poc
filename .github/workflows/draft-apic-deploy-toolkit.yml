@@ -1,4 +1,4 @@
-name: APIC Deploy via Toolkit (SaaS)
+name: APIC Deploy via Toolkit (SaaS-ready)
 
 on:
   workflow_dispatch:
@@ -18,19 +18,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # SECRETS you must set in the repo:
-      # APIC_BASE (may be …/manager; we'll normalize it)
-      # APIC_ORG (e.g., env9559876)
-      # APIC_CATALOG (e.g., sandbox)
-      # APIC_PLATFORM_API (platform API base, e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api)
-      # APIC_APIKEY (your API key from "My API Keys")
-      APIC_BASE:          ${{ secrets.APIC_BASE }}
-      APIC_ORG:           ${{ secrets.APIC_ORG }}
-      APIC_CATALOG:       ${{ secrets.APIC_CATALOG }}
-      APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}
-      APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}
+      # REQUIRED (set as repo secrets)
+      APIC_BASE:          ${{ secrets.APIC_BASE }}           # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      APIC_ORG:           ${{ secrets.APIC_ORG }}            # e.g. env9559876
+      APIC_CATALOG:       ${{ secrets.APIC_CATALOG }}        # e.g. sandbox
+      APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}   # e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api
+      APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}         # API key from “My API Keys”
 
-      # Optional legacy basic creds; ignored on SaaS unless you uncomment their use.
+      # Optional (ignored on SaaS unless you switch to basic auth)
       APIC_USERNAME:      ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD:      ${{ secrets.APIC_PASSWORD }}
 
@@ -65,7 +60,7 @@ jobs:
           set -euo pipefail
           TAR="toolkit/toolkit-linux.tgz"
           if [ ! -s "$TAR" ]; then
-            echo "::error::Expected $TAR in repo."
+            echo "::error::Expected $TAR in repo at $TAR"
             exit 1
           fi
 
@@ -73,13 +68,13 @@ jobs:
           mkdir -p "$APIC_HOME"
           tar -xzf "$TAR" -C "$APIC_HOME"
 
-          # locate binaries
           for C in "$APIC_HOME/apic" "$APIC_HOME/bin/apic"; do
             [ -x "$C" ] && APIC_BIN="$C"
           done
           for C in "$APIC_HOME/apic-slim" "$APIC_HOME/bin/apic-slim"; do
             [ -x "$C" ] && APIC_SLIM="$C"
           done
+
           if [ -z "${APIC_BIN:-}" ]; then
             echo "::error::Could not find 'apic' binary in toolkit payload"
             find "$APIC_HOME" -maxdepth 2 -type f -name 'apic*' -printf '%p\n' || true
@@ -87,35 +82,38 @@ jobs:
           fi
 
           echo "$(dirname "$APIC_BIN")" >> "$GITHUB_PATH"
-          echo "APIC_HOME=$APIC_HOME"   >> "$GITHUB_ENV"
-          echo "APIC_BIN=$APIC_BIN"     >> "$GITHUB_ENV"
+          echo "APIC_HOME=$APIC_HOME"     >> "$GITHUB_ENV"
+          echo "APIC_BIN=$APIC_BIN"       >> "$GITHUB_ENV"
           echo "APIC_SLIM=${APIC_SLIM:-}" >> "$GITHUB_ENV"
 
           apic --accept-license version || true
 
-      - name: Normalize APIC management base
+      - name: Normalize management base URL
         shell: bash
         run: |
           set -euo pipefail
-          # strip trailing slash + optional /manager to get the management base
-          MGMT_BASE="${APIC_BASE%/}"
-          MGMT_BASE="${MGMT_BASE%/manager}"
+          RAW="${APIC_BASE%/}"
+          MGMT_BASE="${RAW%/manager}"              # strip trailing /manager for CLI usage
           echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
-          echo "Using management base: $MGMT_BASE"
+          echo "Using MGMT_BASE: $MGMT_BASE"
+          echo "Platform API: $APIC_PLATFORM_API"
 
-      - name: Login (SaaS API-key via platform API) & sanity
+      - name: Login with API key (SaaS) & hard sanity for provider org
         shell: bash
         run: |
           set -euo pipefail
-          # Login to PLATFORM API with API key
+          echo "🔐 apic login (API key) against Platform API…"
           apic login --sso --context provider \
             --server  "${APIC_PLATFORM_API}" \
             --apiKey  "${APIC_APIKEY}" \
             --accept-license
 
-          # Prove the token works against management
-          echo "Sanity: orgs:list against management base..."
-          apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 20
+          echo "🧪 sanity: orgs:list (must include ${APIC_ORG})"
+          if ! apic orgs:list --server "${MGMT_BASE}" --accept-license | tee /tmp/orgs.txt | grep -q "${APIC_ORG}"; then
+            echo "::error::Login succeeded, but '${APIC_ORG}' not visible to this identity. Ensure the API key owner is a member of provider org '${APIC_ORG}' with an API management role."
+            exit 1
+          fi
+          echo "✅ Logged in and provider org '${APIC_ORG}' is visible."
 
       - name: Push draft API (create or update)
         shell: bash
@@ -127,12 +125,33 @@ jobs:
           NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
           VER=$(yq -r '.info.version' "$API_FILE")
           ID="${NAME}:${VER}"
+          echo "→ Upserting draft API ${ID}"
 
-          echo "➜ Upserting draft API ${ID}"
-          if ! apic drafts:apis:update "${ID}" "$API_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
-            apic drafts:apis:create "$API_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
+          try_upsert() {
+            # Try both command shapes to match toolkit builds
+            if apic draft-apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            # Fallback to create (older builds)
+            if apic draft-apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            return 1
+          }
+
+          if ! try_upsert; then
+            echo "⚠️ First attempt failed, sleeping 2s then retry once (handles rare token propagation glitches)…"
+            sleep 2
+            if ! try_upsert; then
+              echo "::error::Draft API upsert failed. If you see 'Unauthorized', verify the API key owner has API Management **user/admin** in provider org '${APIC_ORG}'."
+              exit 1
+            fi
           fi
           echo "✅ Draft API upserted."
 
@@ -146,12 +165,31 @@ jobs:
           PNAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
           PVER=$(yq -r '.info.version' "$PRODUCT_FILE")
           PID="${PNAME}:${PVER}"
+          echo "→ Upserting draft Product ${PID}"
 
-          echo "➜ Upserting draft Product ${PID}"
-          if ! apic drafts:products:update "${PID}" "$PRODUCT_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
-            apic drafts:products:create "$PRODUCT_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
+          try_upsert_prod() {
+            if apic draft-products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic draft-products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            return 1
+          }
+
+          if ! try_upsert_prod; then
+            echo "⚠️ First attempt failed, sleeping 2s then retry once…"
+            sleep 2
+            if ! try_upsert_prod; then
+              echo "::error::Draft Product upsert failed. If you see 'Unauthorized', verify API-key user’s role in provider org '${APIC_ORG}'."
+              exit 1
+            fi
           fi
           echo "✅ Draft Product upserted."
 
@@ -166,4 +204,4 @@ jobs:
             --catalog "${APIC_CATALOG}" \
             --stage \
             --accept-license
-          echo "🎉 Product published (staged) to catalog '${APIC_CATALOG}'."
+          echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
