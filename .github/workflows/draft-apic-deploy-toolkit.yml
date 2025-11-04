@@ -15,17 +15,13 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
-      # Example: https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_BASE:     ${{ secrets.APIC_BASE }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
-      APIC_ORG:      ${{ secrets.APIC_ORG }}       # e.g. try-ai
-      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}   # e.g. sandbox
-      APIC_REALM:    provider/default-idp-2        # adjust if your realm differs
-      TOOLKIT_IMAGE: cp.icr.io/cp/apic/apic-toolkit:10.0.8.0
-
+      APIC_ORG:      ${{ secrets.APIC_ORG }}        # e.g. try-ai
+      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}    # e.g. sandbox
+      APIC_REALM:    provider/default-idp-2         # adjust if needed
 
     steps:
       - uses: actions/checkout@v4
@@ -36,79 +32,36 @@ jobs:
           for v in APIC_BASE APIC_USERNAME APIC_PASSWORD APIC_ORG APIC_CATALOG; do
             [ -n "${!v:-}" ] || { echo "::error::Missing env $v"; exit 1; }
           done
-          [ -n "${{ secrets.IBM_ENTITLEMENT_KEY }}" ] || { echo "::error::Missing secret IBM_ENTITLEMENT_KEY"; exit 1; }
 
-      # - name: Install APIC Toolkit (public tarball with fallbacks)
-      #   run: |
-      #     set -euo pipefail
-        
-      #     mkdir -p /tmp/apic-tk
-      #     cd /tmp/apic-tk
-        
-      #     # Candidate mirrors & versions (most common public COS buckets + a version fallback)
-      #     CANDIDATES=(
-      #       # 10.0.8.0 (primary)
-      #       "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.8.0/apic-toolkit-linux.tgz"
-      #       # 10.0.7.0 (fallback)
-      #       "https://apic-toolkit-public.s3.us.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.eu.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.eu-de.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-      #       "https://apic-toolkit-public.s3.us-south.cloud-object-storage.appdomain.cloud/10.0.7.0/apic-toolkit-linux.tgz"
-      #     )
-        
-      #     echo "Trying to download IBM API Connect Toolkit from public mirrors…"
-      #     SUCCESS=""
-      #     for URL in "${CANDIDATES[@]}"; do
-      #       echo " GET $URL"
-      #       if curl -fsS -o apic-toolkit.tgz "$URL"; then
-      #         echo " Downloaded from: $URL"
-      #         SUCCESS="$URL"
-      #         break
-      #       else
-      #         echo "Failed: $URL"
-      #       fi
-      #     done
-        
-      #     if [ -z "$SUCCESS" ]; then
-      #       echo "::error::Could not download APIC Toolkit from known public mirrors (HTTP 404)."
-      #       echo "If you have IBM Entitled Registry access, switch to cp.icr.io image pulls instead."
-      #       exit 1
-      #     fi
-        
-      #     # Install
-      #     sudo mkdir -p /usr/local/apic-toolkit
-      #     sudo tar -xzf apic-toolkit.tgz -C /usr/local/apic-toolkit
-      #     # The tar usually contains a single 'apic' binary; link it into PATH
-      #     if [ -x /usr/local/apic-toolkit/apic ]; then
-      #       sudo ln -sf /usr/local/apic-toolkit/apic /usr/local/bin/apic
-      #     elif [ -x /usr/local/apic-toolkit/bin/apic ]; then
-      #       sudo ln -sf /usr/local/apic-toolkit/bin/apic /usr/local/bin/apic
-      #     else
-      #       echo "::error::Installed toolkit did not contain 'apic' in expected location."
-      #       ls -la /usr/local/apic-toolkit || true
-      #       exit 1
-      #     fi
-        
-      #     echo "apic version:"
-      #     apic version
-    
-      - name: Install APIC Toolkit
+      - name: Install APIC Toolkit (from repo file)
         run: |
           set -euo pipefail
-          echo "📦 Installing IBM API Connect Toolkit..."
-          mkdir -p /usr/local/apic
-          tar -xzf toolkit/toolkit-linux.tgz -C /usr/local/apic
-          sudo ln -s /usr/local/apic/apic /usr/local/bin/apic
-          apic --version
+          echo "📦 Installing IBM API Connect Toolkit from toolkit/toolkit-linux.tgz ..."
+          APIC_HOME="${RUNNER_TEMP}/apic-toolkit"
+          mkdir -p "$APIC_HOME"
+          tar -xzf toolkit/toolkit-linux.tgz -C "$APIC_HOME"
 
+          # Find the apic binary inside the tarball (some builds put it at root, others under bin/)
+          if [ -x "$APIC_HOME/apic" ]; then
+            BIN="$APIC_HOME"
+          elif [ -x "$APIC_HOME/bin/apic" ]; then
+            BIN="$APIC_HOME/bin"
+          else
+            echo "::error::Could not find 'apic' binary after extraction."
+            find "$APIC_HOME" -maxdepth 2 -type f -name apic -ls || true
+            exit 1
+          fi
+
+          echo "$BIN" >> "$GITHUB_PATH"
+          echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
+
+          echo "✅ Toolkit installed. Version:"
+          apic version
 
       - name: Login to APIC
         run: |
           set -euo pipefail
-          ${{ steps.toolkit.outputs.apic_cmd }} login \
+          apic login \
             --server  "${APIC_BASE}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
@@ -119,10 +72,9 @@ jobs:
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          # Try create, fall back to update
-          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:create "${API_FILE}" \
+          if ! apic drafts:apis:create "${API_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:update "${API_FILE}" \
+            apic drafts:apis:update "${API_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
@@ -130,9 +82,9 @@ jobs:
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:create "${PRODUCT_FILE}" \
+          if ! apic drafts:products:create "${PRODUCT_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:update "${PRODUCT_FILE}" \
+            apic drafts:products:update "${PRODUCT_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
@@ -140,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          ${{ steps.toolkit.outputs.apic_cmd }} products:publish "${PRODUCT_FILE}" \
+          apic products:publish "${PRODUCT_FILE}" \
             --server "${APIC_BASE}" \
             --org "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
