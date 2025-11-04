@@ -24,7 +24,7 @@ jobs:
       APIC_ORG:      ${{ secrets.APIC_ORG }}
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
       # Use the realm you validated in the UI (provider/default-idp is common on SaaS)
-      APIC_REALM:    ${{ secrets.APIC_REALM || 'provider/default-idp' }}
+      APIC_REALM:    ${{ secrets.APIC_REALM || 'provider/env9559876' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +83,7 @@ jobs:
             CANDIDATE_REALMS+=("${APIC_REALM}")
           fi
           # 2) Try common SaaS defaults
-          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2" "env9559876")
+          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2" "provider/env9559876")
       
           OK=""
           for R in "${CANDIDATE_REALMS[@]}"; do
