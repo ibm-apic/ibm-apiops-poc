@@ -70,15 +70,28 @@ jobs:
           # Provide a wrapper for later steps (we can just use 'apic' since PATH is updated)
           echo "apic_cmd=apic" >> "$GITHUB_OUTPUT"
 
+      # put this right before "Login to APIC"
+      - name: Normalize APIC server
+        id: norm
+        run: |
+          set -euo pipefail
+          # Strip trailing slashes and any /manager suffix from APIC_BASE
+          S="${APIC_BASE%/}"
+          S="${S%/manager}"
+          echo "server=${S}" >> "$GITHUB_OUTPUT"
+      
       - name: Login to APIC
         run: |
           set -euo pipefail
-          ${{ steps.toolkit.outputs.apic_cmd }} login \
-            --server  "${APIC_BASE}" \
+          apic login \
+            --server  "${{ steps.norm.outputs.server }}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
             --realm    "${APIC_REALM}" \
             --accept-license
+          # sanity check
+          apic orgs:list --server "${{ steps.norm.outputs.server }}" --accept-license
+
 
       - name: Push draft API (create or update)
         run: |
