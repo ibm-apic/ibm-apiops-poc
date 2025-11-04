@@ -83,7 +83,7 @@ jobs:
             CANDIDATE_REALMS+=("${APIC_REALM}")
           fi
           # 2) Try common SaaS defaults
-          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2")
+          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2" "env9559876")
       
           OK=""
           for R in "${CANDIDATE_REALMS[@]}"; do
