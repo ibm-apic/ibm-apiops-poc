@@ -15,13 +15,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     env:
+      # Example: https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_BASE:     ${{ secrets.APIC_BASE }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG:      ${{ secrets.APIC_ORG }}        # e.g. try-ai
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}    # e.g. sandbox
-      APIC_REALM:    provider/default-idp-2         # adjust if needed
+      APIC_REALM:    provider/default-idp-2         # adjust if your realm differs
 
     steps:
       - uses: actions/checkout@v4
@@ -32,40 +34,46 @@ jobs:
           for v in APIC_BASE APIC_USERNAME APIC_PASSWORD APIC_ORG APIC_CATALOG; do
             [ -n "${!v:-}" ] || { echo "::error::Missing env $v"; exit 1; }
           done
+          # Also ensure the toolkit tarball exists in the repo
+          test -f toolkit/toolkit-linux.tgz || { echo "::error::Missing toolkit/toolkit-linux.tgz"; exit 1; }
 
       - name: Install APIC Toolkit (from repo file)
-        shell: bash
+        id: toolkit
         run: |
           set -euo pipefail
+
           echo "📦 Installing IBM API Connect Toolkit from toolkit/toolkit-linux.tgz ..."
           APIC_HOME="${RUNNER_TEMP}/apic-toolkit"
           mkdir -p "$APIC_HOME"
           tar -xzf toolkit/toolkit-linux.tgz -C "$APIC_HOME"
 
-          # Locate the 'apic' binary (some archives put it at root, others under bin/)
-          if [ -x "$APIC_HOME/apic" ]; then
-            BIN="$APIC_HOME"
-          elif [ -x "$APIC_HOME/bin/apic" ]; then
-            BIN="$APIC_HOME/bin"
+          # Locate the apic binary (some bundles place it at root, others under bin/)
+          if [ -x "${APIC_HOME}/apic" ]; then
+            BIN="${APIC_HOME}"
+          elif [ -x "${APIC_HOME}/bin/apic" ]; then
+            BIN="${APIC_HOME}/bin"
           else
-            echo "::error::Could not find 'apic' binary after extraction."
-            find "$APIC_HOME" -maxdepth 3 -type f -name apic -ls || true
+            echo "::error::Could not find 'apic' after extraction."
+            find "$APIC_HOME" -maxdepth 2 -type f -name apic -ls || true
             exit 1
           fi
 
-          # Make it available NOW (this step) and for subsequent steps
-          export PATH="$BIN:$PATH"
+          # Add Toolkit to PATH for subsequent steps
           echo "$BIN" >> "$GITHUB_PATH"
-          echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
+          # Expose APIC_HOME for reference/debug
+          echo "APIC_HOME=${APIC_HOME}" >> "$GITHUB_ENV"
 
-          echo "✅ Toolkit installed. Version:"
-          "$BIN/apic" version
+          # 👇 Accept license non-interactively and show version
+          "${BIN}/apic" --accept-license version
+
+          echo "✅ Toolkit installed. Version above."
+          # Provide a wrapper for later steps (we can just use 'apic' since PATH is updated)
+          echo "apic_cmd=apic" >> "$GITHUB_OUTPUT"
 
       - name: Login to APIC
-        shell: bash
         run: |
           set -euo pipefail
-          apic login \
+          ${{ steps.toolkit.outputs.apic_cmd }} login \
             --server  "${APIC_BASE}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
@@ -73,33 +81,30 @@ jobs:
             --accept-license
 
       - name: Push draft API (create or update)
-        shell: bash
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          if ! apic drafts:apis:create "${API_FILE}" \
+          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:create "${API_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:apis:update "${API_FILE}" \
+            ${{ steps.toolkit.outputs.apic_cmd }} drafts:apis:update "${API_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
       - name: Push draft Product (create or update)
-        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          if ! apic drafts:products:create "${PRODUCT_FILE}" \
+          if ! ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:create "${PRODUCT_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:products:update "${PRODUCT_FILE}" \
+            ${{ steps.toolkit.outputs.apic_cmd }} drafts:products:update "${PRODUCT_FILE}" \
                 --server "${APIC_BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
       - name: Publish product to catalog (stage)
-        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          apic products:publish "${PRODUCT_FILE}" \
+          ${{ steps.toolkit.outputs.apic_cmd }} products:publish "${PRODUCT_FILE}" \
             --server "${APIC_BASE}" \
             --org "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
