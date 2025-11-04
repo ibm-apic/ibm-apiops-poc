@@ -1,4 +1,4 @@
-name: APIC Deploy via Toolkit
+name: APIC Deploy via Toolkit (SaaS / repo toolkit)
 
 on:
   workflow_dispatch:
@@ -14,129 +14,144 @@ on:
 
 jobs:
   deploy:
+    name: Deploy draft API & Product, then publish
     runs-on: ubuntu-latest
 
     env:
-      # e.g. https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      # Secrets you must set in the repo:
+      # APIC_BASE       -> e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      # APIC_USERNAME   -> your Manager user (provider org member)
+      # APIC_PASSWORD   -> password for that user
+      # APIC_ORG        -> e.g. env9559876   (provider org id)
+      # APIC_CATALOG    -> e.g. sandbox     (catalog name in that org)
       APIC_BASE:     ${{ secrets.APIC_BASE }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG:      ${{ secrets.APIC_ORG }}
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
-      # Use the realm you validated in the UI (provider/default-idp is common on SaaS)
-      APIC_REALM:    ${{ secrets.APIC_REALM || 'provider/env9559876' }}
 
     steps:
+      - name: Checkout
       - uses: actions/checkout@v4
 
       - name: Guard required secrets
+        shell: bash
         run: |
           set -euo pipefail
           for v in APIC_BASE APIC_USERNAME APIC_PASSWORD APIC_ORG APIC_CATALOG; do
-            [ -n "${!v:-}" ] || { echo "::error::Missing env $v"; exit 1; }
+            if [ -z "${!v:-}" ]; then
+              echo "::error title=Missing secret::Env var '$v' is empty/missing"
+              exit 1
+            fi
           done
+          echo "✅ Secrets present."
 
-      - name: Install APIC Toolkit (from repo file)
+      - name: Install APIC Toolkit from repo file
         id: tk
         shell: bash
         run: |
           set -euo pipefail
-          echo "📦 Installing IBM API Connect Toolkit from toolkit/toolkit-linux.tgz ..."
-          APIC_HOME="${RUNNER_TEMP}/apic-toolkit"
-          mkdir -p "$APIC_HOME"
-          tar -xzf toolkit/toolkit-linux.tgz -C "$APIC_HOME"
-
-          # Find the binary (some builds put it in root, others under bin/)
-          if   [ -x "${APIC_HOME}/apic" ];      then BIN="${APIC_HOME}"
-          elif [ -x "${APIC_HOME}/bin/apic" ];  then BIN="${APIC_HOME}/bin"
-          else
-            echo "::error::Could not find 'apic' after extraction."
-            find "$APIC_HOME" -maxdepth 2 -type f -name apic -ls || true
+          TAR="toolkit/toolkit-linux.tgz"
+          if [ ! -s "$TAR" ]; then
+            echo "::error title=Toolkit missing::Expected $TAR in repo. Please upload your APIC toolkit tarball there."
             exit 1
           fi
 
-          # Make it available now AND for later steps
-          export PATH="${BIN}:$PATH"
-          echo "${BIN}"       >> "$GITHUB_PATH"           # for later steps
-          echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
-          echo "APIC_BIN=${BIN}/apic" >> "$GITHUB_ENV"
+          APIC_HOME="$(mktemp -d)/apic-toolkit"
+          mkdir -p "$APIC_HOME"
+          tar -xzf "$TAR" -C "$APIC_HOME"
 
-          # Accept license and show version using full path (works in this current step)
-          "${BIN}/apic" --accept-license version
+          # Find the actual 'apic' binary (some builds place it at root, others under ./bin)
+          if   [ -x "${APIC_HOME}/apic" ]; then BIN="${APIC_HOME}/apic"
+          elif [ -x "${APIC_HOME}/bin/apic" ]; then BIN="${APIC_HOME}/bin/apic"
+          else
+            echo "::group::Toolkit contents"
+            find "$APIC_HOME" -maxdepth 2 -type f | sed 's/^/ - /'
+            echo "::endgroup::"
+            echo "::error title=apic not found::Could not locate 'apic' binary in extracted toolkit."
+            exit 1
+          fi
+
+          # Put the dir containing 'apic' on PATH for subsequent steps
+          echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
+          echo "APIC_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
+
+          # Accept license non-interactively and print version
+          "$BIN" --accept-license version
+
+          echo "✅ Toolkit installed at $APIC_HOME"
+          echo "bin: $BIN"
 
       - name: Normalize APIC server URL
         id: norm
-        run: |
-          set -euo pipefail
-          # Strip trailing /manager if present
-          BASE="${APIC_BASE%/manager}"
-          echo "BASE=$BASE" >> "$GITHUB_ENV"
-          echo "Using server: $BASE"
-
-      - name: Login to APIC
         shell: bash
         run: |
           set -euo pipefail
-          CANDIDATE_REALMS=()
-          # 1) Respect explicit secret if provided
-          if [ -n "${APIC_REALM:-}" ]; then
-            CANDIDATE_REALMS+=("${APIC_REALM}")
-          fi
-          # 2) Try common SaaS defaults
-          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2" "provider/env9559876")
-      
-          OK=""
-          for R in "${CANDIDATE_REALMS[@]}"; do
-            echo "🔐 Trying realm: $R"
-            if "$APIC_BIN" login \
-                 --server   "${BASE}" \
-                 --username "${APIC_USERNAME}" \
-                 --password "${APIC_PASSWORD}" \
-                 --realm    "$R" \
-                 --accept-license; then
-              echo "APIC_REALM=$R" >> "$GITHUB_ENV"
-              OK="yes"
-              break
-            fi
-            echo "Realm $R failed; trying next..."
-          done
-      
-          if [ -z "$OK" ]; then
-            echo "::error::Login failed for tested realms. Please verify the correct identity provider name in Manager > Administration > Identity providers (Provider context)."
-            exit 1
-          fi
-      
-          # Sanity check
-          "$APIC_BIN" orgs:list --server "${BASE}" --accept-license | head -n 20 || true
+          BASE="$APIC_BASE"
+          # Strip trailing slash
+          BASE="${BASE%/}"
+          echo "BASE=$BASE" >> "$GITHUB_ENV"
+          echo "Using Manager base: $BASE"
 
+      - name: Login to APIC (realm = provider/${APIC_ORG})
+        shell: bash
+        run: |
+          set -euo pipefail
+          REALM="provider/${APIC_ORG}"
+          echo "Using realm: $REALM"
+          apic login \
+            --server   "${BASE}" \
+            --username "${APIC_USERNAME}" \
+            --password "${APIC_PASSWORD}" \
+            --realm    "${REALM}" \
+            --accept-license
+
+          # quick sanity check (will 401/403 if session invalid)
+          apic orgs:list --server "${BASE}" --accept-license | head -n 20 || true
+          echo "✅ Logged in."
 
       - name: Push draft API (create or update)
+        shell: bash
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          if ! "$APIC_BIN" drafts:apis:create "${API_FILE}" \
+          if [ ! -s "$API_FILE" ]; then
+            echo "::error title=Missing API file::$API_FILE not found"
+            exit 1
+          end
+          if ! apic drafts:apis:create "$API_FILE" \
                 --server "${BASE}" --org "${APIC_ORG}" --accept-license ; then
-            "$APIC_BIN" drafts:apis:update "${API_FILE}" \
+            apic drafts:apis:update "$API_FILE" \
                 --server "${BASE}" --org "${APIC_ORG}" --accept-license
           fi
+          echo "✅ Draft API upserted."
 
       - name: Push draft Product (create or update)
+        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          if ! "$APIC_BIN" drafts:products:create "${PRODUCT_FILE}" \
+          if [ ! -s "$PRODUCT_FILE" ]; then
+            echo "::error title=Missing Product file::$PRODUCT_FILE not found"
+            exit 1
+          fi
+          if ! apic drafts:products:create "$PRODUCT_FILE" \
                 --server "${BASE}" --org "${APIC_ORG}" --accept-license ; then
-            "$APIC_BIN" drafts:products:update "${PRODUCT_FILE}" \
+            apic drafts:products:update "$PRODUCT_FILE" \
                 --server "${BASE}" --org "${APIC_ORG}" --accept-license
           fi
+          echo "✅ Draft Product upserted."
 
       - name: Publish product to catalog (stage)
+        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          "$APIC_BIN" products:publish "${PRODUCT_FILE}" \
-            --server "${BASE}" \
-            --org "${APIC_ORG}" \
+          apic products:publish "$PRODUCT_FILE" \
+            --server  "${BASE}" \
+            --org     "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
             --stage \
             --accept-license
+          echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
