@@ -18,21 +18,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # Secrets you must set in the repo:
-      # APIC_BASE       -> e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
-      # APIC_USERNAME   -> your Manager user (provider org member)
-      # APIC_PASSWORD   -> password for that user
-      # APIC_ORG        -> e.g. env9559876   (provider org id)
-      # APIC_CATALOG    -> e.g. sandbox     (catalog name in that org)
-      APIC_BASE:     ${{ secrets.APIC_BASE }}
+      APIC_BASE:     ${{ secrets.APIC_BASE }}      # e.g. https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
-      APIC_ORG:      ${{ secrets.APIC_ORG }}
-      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+      APIC_ORG:      ${{ secrets.APIC_ORG }}       # e.g. env9559876
+      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}   # e.g. sandbox
 
     steps:
       - name: Checkout
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       - name: Guard required secrets
         shell: bash
@@ -61,7 +55,6 @@ jobs:
           mkdir -p "$APIC_HOME"
           tar -xzf "$TAR" -C "$APIC_HOME"
 
-          # Find the actual 'apic' binary (some builds place it at root, others under ./bin)
           if   [ -x "${APIC_HOME}/apic" ]; then BIN="${APIC_HOME}/apic"
           elif [ -x "${APIC_HOME}/bin/apic" ]; then BIN="${APIC_HOME}/bin/apic"
           else
@@ -72,25 +65,19 @@ jobs:
             exit 1
           fi
 
-          # Put the dir containing 'apic' on PATH for subsequent steps
           echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
           echo "APIC_BIN=$BIN" >> "$GITHUB_ENV"
           echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
 
-          # Accept license non-interactively and print version
           "$BIN" --accept-license version
-
           echo "✅ Toolkit installed at $APIC_HOME"
-          echo "bin: $BIN"
 
       - name: Normalize APIC server URL
         id: norm
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$APIC_BASE"
-          # Strip trailing slash
-          BASE="${BASE%/}"
+          BASE="${APIC_BASE%/}"
           echo "BASE=$BASE" >> "$GITHUB_ENV"
           echo "Using Manager base: $BASE"
 
@@ -107,7 +94,6 @@ jobs:
             --realm    "${REALM}" \
             --accept-license
 
-          # quick sanity check (will 401/403 if session invalid)
           apic orgs:list --server "${BASE}" --accept-license | head -n 20 || true
           echo "✅ Logged in."
 
@@ -119,7 +105,7 @@ jobs:
           if [ ! -s "$API_FILE" ]; then
             echo "::error title=Missing API file::$API_FILE not found"
             exit 1
-          end
+          fi
           if ! apic drafts:apis:create "$API_FILE" \
                 --server "${BASE}" --org "${APIC_ORG}" --accept-license ; then
             apic drafts:apis:update "$API_FILE" \
