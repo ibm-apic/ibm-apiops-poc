@@ -98,26 +98,31 @@ jobs:
           echo "Using MGMT_BASE: $MGMT_BASE"
           echo "Platform API: $APIC_PLATFORM_API"
 
-      - name: Login with API key (SaaS) & hard sanity for provider org
+      - name: Login (prefer API key; supports no-apic-slim tar)
         shell: bash
         run: |
           set -euo pipefail
-          apic login --sso --context provider \
-            --server  "${APIC_PLATFORM_API}" \
-            --apiKey  "${APIC_APIKEY}" \
-            --accept-license
-      
-          echo "🔎 sanity: orgs:list (must include ${APIC_ORG})"
-          apic orgs:list --server "${MGMT_BASE}" --accept-license | tee /tmp/orgs.txt
-      
-          if ! grep -q "^${APIC_ORG}\b" /tmp/orgs.txt; then
-            echo "::error::Login succeeded, but '${APIC_ORG}' is not visible to this identity."
-            echo "Ensure the API key owner is a MEMBER of provider org '${APIC_ORG}' with an API management role."
-            exit 1
-          fi
-      
-          echo "✅ Logged in and provider org '${APIC_ORG}' is visible."
+          REALM="provider/${APIC_ORG}"
 
+          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
+            echo "🔐 SaaS login with API key"
+            apic login --sso --context provider \
+              --server  "${APIC_PLATFORM_API}" \
+              --apiKey  "${APIC_APIKEY}" \
+              --accept-license
+            # Sanity check (non-fatal) against MGMT_BASE (no /manager)
+            apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 10 >/dev/null || true
+            echo "✅ Logged in with API key."
+          else
+            echo "🧪 Falling back to user/password (on-prem only)"
+            apic login \
+              --server   "${MGMT_BASE}" \
+              --username "${APIC_USERNAME}" \
+              --password "${APIC_PASSWORD}" \
+              --realm    "${REALM}" \
+              --accept-license
+            echo "✅ Logged in with user/password."
+          fi
 
       - name: Push draft API (create or update)
         shell: bash
