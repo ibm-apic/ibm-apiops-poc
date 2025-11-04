@@ -73,41 +73,41 @@ jobs:
           echo "BASE=$BASE" >> "$GITHUB_ENV"
           echo "Using server: $BASE"
 
-          - name: Login to APIC
-            shell: bash
-            run: |
-              set -euo pipefail
-              CANDIDATE_REALMS=()
-              # 1) Respect explicit secret if provided
-              if [ -n "${APIC_REALM:-}" ]; then
-                CANDIDATE_REALMS+=("${APIC_REALM}")
-              fi
-              # 2) Try common SaaS defaults
-              CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2")
-          
-              OK=""
-              for R in "${CANDIDATE_REALMS[@]}"; do
-                echo "🔐 Trying realm: $R"
-                if "$APIC_BIN" login \
-                     --server   "${BASE}" \
-                     --username "${APIC_USERNAME}" \
-                     --password "${APIC_PASSWORD}" \
-                     --realm    "$R" \
-                     --accept-license; then
-                  echo "APIC_REALM=$R" >> "$GITHUB_ENV"
-                  OK="yes"
-                  break
-                fi
-                echo "Realm $R failed; trying next..."
-              done
-          
-              if [ -z "$OK" ]; then
-                echo "::error::Login failed for tested realms. Please verify the correct identity provider name in Manager > Administration > Identity providers (Provider context)."
-                exit 1
-              fi
-          
-              # Sanity check
-              "$APIC_BIN" orgs:list --server "${BASE}" --accept-license | head -n 20 || true
+      - name: Login to APIC
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_REALMS=()
+          # 1) Respect explicit secret if provided
+          if [ -n "${APIC_REALM:-}" ]; then
+            CANDIDATE_REALMS+=("${APIC_REALM}")
+          fi
+          # 2) Try common SaaS defaults
+          CANDIDATE_REALMS+=("provider/default-idp" "provider/default-idp-2")
+      
+          OK=""
+          for R in "${CANDIDATE_REALMS[@]}"; do
+            echo "🔐 Trying realm: $R"
+            if "$APIC_BIN" login \
+                 --server   "${BASE}" \
+                 --username "${APIC_USERNAME}" \
+                 --password "${APIC_PASSWORD}" \
+                 --realm    "$R" \
+                 --accept-license; then
+              echo "APIC_REALM=$R" >> "$GITHUB_ENV"
+              OK="yes"
+              break
+            fi
+            echo "Realm $R failed; trying next..."
+          done
+      
+          if [ -z "$OK" ]; then
+            echo "::error::Login failed for tested realms. Please verify the correct identity provider name in Manager > Administration > Identity providers (Provider context)."
+            exit 1
+          fi
+      
+          # Sanity check
+          "$APIC_BIN" orgs:list --server "${BASE}" --accept-license | head -n 20 || true
 
 
       - name: Push draft API (create or update)
