@@ -1,4 +1,4 @@
-name: APIC Deploy via Toolkit (SaaS-ready)
+name: APIC Deploy via Toolkit (SaaS)
 
 on:
   workflow_dispatch:
@@ -18,19 +18,21 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # Manager base (e.g. https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager)
-      APIC_BASE:     ${{ secrets.APIC_BASE }}
-      # SaaS: provider org name (e.g. env9559876)
-      APIC_ORG:      ${{ secrets.APIC_ORG }}
-      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+      # SECRETS you must set in the repo:
+      # APIC_BASE (may be …/manager; we'll normalize it)
+      # APIC_ORG (e.g., env9559876)
+      # APIC_CATALOG (e.g., sandbox)
+      # APIC_PLATFORM_API (platform API base, e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api)
+      # APIC_APIKEY (your API key from "My API Keys")
+      APIC_BASE:          ${{ secrets.APIC_BASE }}
+      APIC_ORG:           ${{ secrets.APIC_ORG }}
+      APIC_CATALOG:       ${{ secrets.APIC_CATALOG }}
+      APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}
+      APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}
 
-      # SaaS API-key auth (recommended)
-      APIC_PLATFORM_API: ${{ secrets.APIC_PLATFORM_API }}
-      APIC_APIKEY:       ${{ secrets.APIC_APIKEY }}
-
-      # Optional legacy/basic (for on-prem only). Will be ignored on SaaS.
-      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
-      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
+      # Optional legacy basic creds; ignored on SaaS unless you uncomment their use.
+      APIC_USERNAME:      ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD:      ${{ secrets.APIC_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -40,15 +42,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          miss=""
-          for v in APIC_BASE APIC_ORG APIC_CATALOG; do [ -n "${!v:-}" ] || miss="$miss $v"; done
-          if [ -n "${miss}" ]; then echo "::error::Missing env: $miss"; exit 1; fi
-          if [ -z "${APIC_APIKEY:-}" ] || [ -z "${APIC_PLATFORM_API:-}" ]; then
-            echo "::warning::APIC_APIKEY/APIC_PLATFORM_API not set -> will try username/password (on-prem only). SaaS will FAIL."
+          miss=()
+          for v in APIC_BASE APIC_ORG APIC_CATALOG APIC_PLATFORM_API APIC_APIKEY; do
+            [ -n "${!v:-}" ] || miss+=("$v")
+          done
+          if [ ${#miss[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets/env: ${miss[*]}"
+            exit 1
           fi
 
-      - name: Install APIC Toolkit from repo file
-        id: tk
+      - name: Install yq (v4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Install APIC Toolkit from repo (toolkit/toolkit-linux.tgz)
         shell: bash
         run: |
           set -euo pipefail
@@ -57,74 +68,67 @@ jobs:
             echo "::error::Expected $TAR in repo."
             exit 1
           fi
+
           APIC_HOME="$(mktemp -d)/apic-toolkit"
           mkdir -p "$APIC_HOME"
           tar -xzf "$TAR" -C "$APIC_HOME"
 
-          # find apic + apic-slim
-          for CAND in "$APIC_HOME/apic" "$APIC_HOME/bin/apic"; do
-            [ -x "$CAND" ] && APIC_BIN="$CAND"
+          # locate binaries
+          for C in "$APIC_HOME/apic" "$APIC_HOME/bin/apic"; do
+            [ -x "$C" ] && APIC_BIN="$C"
           done
-          for CAND in "$APIC_HOME/apic-slim" "$APIC_HOME/bin/apic-slim"; do
-            [ -x "$CAND" ] && APIC_SLIM="$CAND"
+          for C in "$APIC_HOME/apic-slim" "$APIC_HOME/bin/apic-slim"; do
+            [ -x "$C" ] && APIC_SLIM="$C"
           done
           if [ -z "${APIC_BIN:-}" ]; then
-            echo "::error::Could not find 'apic' in toolkit"
+            echo "::error::Could not find 'apic' binary in toolkit payload"
             find "$APIC_HOME" -maxdepth 2 -type f -name 'apic*' -printf '%p\n' || true
             exit 1
           fi
+
           echo "$(dirname "$APIC_BIN")" >> "$GITHUB_PATH"
           echo "APIC_HOME=$APIC_HOME"   >> "$GITHUB_ENV"
           echo "APIC_BIN=$APIC_BIN"     >> "$GITHUB_ENV"
           echo "APIC_SLIM=${APIC_SLIM:-}" >> "$GITHUB_ENV"
 
-          "$APIC_BIN" --accept-license version
-          echo "✅ Toolkit ready. apic: $APIC_BIN  apic-slim: ${APIC_SLIM:-<none>}"
+          apic --accept-license version || true
 
-      - name: Normalize APIC server URLs
+      - name: Normalize APIC management base
         shell: bash
         run: |
           set -euo pipefail
-          # APIC_BASE may be configured as .../manager; for CLI we need the mgmt root
+          # strip trailing slash + optional /manager to get the management base
           MGMT_BASE="${APIC_BASE%/}"
           MGMT_BASE="${MGMT_BASE%/manager}"
           echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
           echo "Using management base: $MGMT_BASE"
-      
-      - name: Login with API key (SaaS)
+
+      - name: Login (SaaS API-key via platform API) & sanity
         shell: bash
         run: |
           set -euo pipefail
-          # Login against the platform API (not the manager)
+          # Login to PLATFORM API with API key
           apic login --sso --context provider \
-            --server "${APIC_PLATFORM_API}" \
-            --apiKey "${APIC_APIKEY}" \
+            --server  "${APIC_PLATFORM_API}" \
+            --apiKey  "${APIC_APIKEY}" \
             --accept-license
-          # Sanity: prove our token works against the MANAGEMENT base
-          echo "Sanity: listing orgs on MGMT..."
+
+          # Prove the token works against management
+          echo "Sanity: orgs:list against management base..."
           apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 20
 
-      - name: Install yq (v4)
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="v4.44.3"
-          curl -fsSL "https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_linux_amd64" -o /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
-          yq --version
-      
       - name: Push draft API (create or update)
         shell: bash
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          [ -s "$API_FILE" ] || { echo "::error::Missing $API_FILE"; exit 1; }
+          [ -s "$API_FILE" ] || { echo "::error::Missing file: $API_FILE"; exit 1; }
+
           NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
           VER=$(yq -r '.info.version' "$API_FILE")
           ID="${NAME}:${VER}"
+
           echo "➜ Upserting draft API ${ID}"
-      
-          # Preferred: update NAME:VERSION with FILE; fallback to create
           if ! apic drafts:apis:update "${ID}" "$API_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
             apic drafts:apis:create "$API_FILE" \
@@ -137,21 +141,19 @@ jobs:
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          [ -s "$PRODUCT_FILE" ] || { echo "::error::Missing $PRODUCT_FILE"; exit 1; }
-      
+          [ -s "$PRODUCT_FILE" ] || { echo "::error::Missing file: $PRODUCT_FILE"; exit 1; }
+
           PNAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
           PVER=$(yq -r '.info.version' "$PRODUCT_FILE")
           PID="${PNAME}:${PVER}"
-          echo "→ Upserting draft Product ${PID}"
-      
-          if ! apic draft-products:update "${PID}" "${PRODUCT_FILE}" \
+
+          echo "➜ Upserting draft Product ${PID}"
+          if ! apic drafts:products:update "${PID}" "$PRODUCT_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
-            apic draft-products:create "${PRODUCT_FILE}" \
+            apic drafts:products:create "$PRODUCT_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
           echo "✅ Draft Product upserted."
-
-
 
       - name: Publish product to catalog (stage)
         shell: bash
@@ -164,5 +166,4 @@ jobs:
             --catalog "${APIC_CATALOG}" \
             --stage \
             --accept-license
-          echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
-
+          echo "🎉 Product published (staged) to catalog '${APIC_CATALOG}'."
