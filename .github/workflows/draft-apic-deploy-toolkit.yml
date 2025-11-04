@@ -126,12 +126,14 @@ jobs:
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
           [ -s "$API_FILE" ] || { echo "::error::Missing $API_FILE"; exit 1; }
-          if ! apic drafts:apis:create "$API_FILE" \
+        
+          if ! apic draft-apis:create "$API_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:apis:update "$API_FILE" \
+            apic draft-apis:update "$API_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
           echo "✅ Draft API upserted."
+
 
       - name: Push draft Product (create or update)
         shell: bash
@@ -139,12 +141,14 @@ jobs:
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           [ -s "$PRODUCT_FILE" ] || { echo "::error::Missing $PRODUCT_FILE"; exit 1; }
-          if ! apic drafts:products:create "$PRODUCT_FILE" \
+      
+          if ! apic draft-products:create "$PRODUCT_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:products:update "$PRODUCT_FILE" \
+            apic draft-products:update "$PRODUCT_FILE" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
           echo "✅ Draft Product upserted."
+
 
       - name: Publish product to catalog (stage)
         shell: bash
@@ -152,9 +156,10 @@ jobs:
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           apic products:publish "$PRODUCT_FILE" \
-            --server  "${BASE}" \
+            --server  "${MGMT_BASE}" \
             --org     "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
             --stage \
             --accept-license
           echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
+
