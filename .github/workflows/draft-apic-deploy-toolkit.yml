@@ -17,11 +17,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # e.g. https://envxxxxx.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_BASE:     ${{ secrets.APIC_BASE }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG:      ${{ secrets.APIC_ORG }}
       APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+      # Use the realm you validated in the UI (provider/default-idp is common on SaaS)
+      APIC_REALM:    ${{ secrets.APIC_REALM || 'provider/default-idp' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,96 +33,85 @@ jobs:
         run: |
           set -euo pipefail
           for v in APIC_BASE APIC_USERNAME APIC_PASSWORD APIC_ORG APIC_CATALOG; do
-            test -n "${!v:-}" || { echo "::error::Missing env $v"; exit 1; }
+            [ -n "${!v:-}" ] || { echo "::error::Missing env $v"; exit 1; }
           done
-          test -f toolkit/toolkit-linux.tgz || { echo "::error::Missing toolkit/toolkit-linux.tgz"; exit 1; }
 
       - name: Install APIC Toolkit (from repo file)
-        id: toolkit
+        id: tk
+        shell: bash
         run: |
           set -euo pipefail
+          echo "📦 Installing IBM API Connect Toolkit from toolkit/toolkit-linux.tgz ..."
           APIC_HOME="${RUNNER_TEMP}/apic-toolkit"
           mkdir -p "$APIC_HOME"
           tar -xzf toolkit/toolkit-linux.tgz -C "$APIC_HOME"
 
-          if [ -x "${APIC_HOME}/apic" ]; then
-            BIN="${APIC_HOME}"
-          elif [ -x "${APIC_HOME}/bin/apic" ]; then
-            BIN="${APIC_HOME}/bin"
+          # Find the binary (some builds put it in root, others under bin/)
+          if   [ -x "${APIC_HOME}/apic" ];      then BIN="${APIC_HOME}"
+          elif [ -x "${APIC_HOME}/bin/apic" ];  then BIN="${APIC_HOME}/bin"
           else
-            echo "::error::Could not find apic binary"; find "$APIC_HOME" -name apic; exit 1
+            echo "::error::Could not find 'apic' after extraction."
+            find "$APIC_HOME" -maxdepth 2 -type f -name apic -ls || true
+            exit 1
           fi
 
-          echo "$BIN" >> "$GITHUB_PATH"
+          # Make it available now AND for later steps
+          export PATH="${BIN}:$PATH"
+          echo "${BIN}"       >> "$GITHUB_PATH"           # for later steps
           echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
-          apic --accept-license version
+          echo "APIC_BIN=${BIN}/apic" >> "$GITHUB_ENV"
 
-      - name: Normalize APIC server
+          # Accept license and show version using full path (works in this current step)
+          "${BIN}/apic" --accept-license version
+
+      - name: Normalize APIC server URL
         id: norm
         run: |
           set -euo pipefail
-          S="${APIC_BASE%/}"
-          S="${S%/manager}"
-          echo "server=$S" >> "$GITHUB_OUTPUT"
-          echo "Normalized server: $S"
-
-      - name: Detect correct Realm (auto)
-        id: realm
-        run: |
-          set -euo pipefail
-          # Try listing available IDPs
-          echo "🔍 Detecting valid realm from ${{ steps.norm.outputs.server }}..."
-          OUT=$(curl -sk -u "${APIC_USERNAME}:${APIC_PASSWORD}" \
-            "${{ steps.norm.outputs.server }}/api/cloud/settings/identity-providers" || true)
-          echo "$OUT" | jq .
-          REALM=$(echo "$OUT" | jq -r '.[0].name // empty')
-          if [ -z "$REALM" ]; then
-            echo "::warning::Could not auto-detect realm, defaulting to provider/default-idp"
-            REALM="default-idp"
-          fi
-          echo "realm=provider/${REALM}" >> "$GITHUB_OUTPUT"
-          echo "✅ Using realm: provider/${REALM}"
+          # Strip trailing /manager if present
+          BASE="${APIC_BASE%/manager}"
+          echo "BASE=$BASE" >> "$GITHUB_ENV"
+          echo "Using server: $BASE"
 
       - name: Login to APIC
         run: |
           set -euo pipefail
-          apic login \
-            --server  "${{ steps.norm.outputs.server }}" \
+          "$APIC_BIN" login \
+            --server   "${BASE}" \
             --username "${APIC_USERNAME}" \
             --password "${APIC_PASSWORD}" \
-            --realm    "${{ steps.realm.outputs.realm }}" \
+            --realm    "${APIC_REALM}" \
             --accept-license
+
+          # Quick sanity check (will 401/403 if auth failed)
+          "$APIC_BIN" orgs:list --server "${BASE}" --accept-license | head -n 20 || true
 
       - name: Push draft API (create or update)
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          if ! apic drafts:apis:create "${API_FILE}" \
-                --server "${{ steps.norm.outputs.server }}" \
-                --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:apis:update "${API_FILE}" \
-                --server "${{ steps.norm.outputs.server }}" \
-                --org "${APIC_ORG}" --accept-license
+          if ! "$APIC_BIN" drafts:apis:create "${API_FILE}" \
+                --server "${BASE}" --org "${APIC_ORG}" --accept-license ; then
+            "$APIC_BIN" drafts:apis:update "${API_FILE}" \
+                --server "${BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
       - name: Push draft Product (create or update)
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          if ! apic drafts:products:create "${PRODUCT_FILE}" \
-                --server "${{ steps.norm.outputs.server }}" \
-                --org "${APIC_ORG}" --accept-license ; then
-            apic drafts:products:update "${PRODUCT_FILE}" \
-                --server "${{ steps.norm.outputs.server }}" \
-                --org "${APIC_ORG}" --accept-license
+          if ! "$APIC_BIN" drafts:products:create "${PRODUCT_FILE}" \
+                --server "${BASE}" --org "${APIC_ORG}" --accept-license ; then
+            "$APIC_BIN" drafts:products:update "${PRODUCT_FILE}" \
+                --server "${BASE}" --org "${APIC_ORG}" --accept-license
           fi
 
       - name: Publish product to catalog (stage)
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          apic products:publish "${PRODUCT_FILE}" \
-            --server "${{ steps.norm.outputs.server }}" \
+          "$APIC_BIN" products:publish "${PRODUCT_FILE}" \
+            --server "${BASE}" \
             --org "${APIC_ORG}" \
             --catalog "${APIC_CATALOG}" \
             --stage \
