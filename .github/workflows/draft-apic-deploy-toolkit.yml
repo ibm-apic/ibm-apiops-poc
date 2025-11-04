@@ -81,43 +81,47 @@ jobs:
           "$APIC_BIN" --accept-license version
           echo "✅ Toolkit ready. apic: $APIC_BIN  apic-slim: ${APIC_SLIM:-<none>}"
 
-      - name: Normalize APIC server URL
-        id: norm
+      - name: Normalize APIC server URLs
         shell: bash
         run: |
           set -euo pipefail
-          # APIC_BASE is like https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
-          RAW="${APIC_BASE%/}"
-          MGMT_BASE="${RAW%/manager}"           # strip trailing /manager for CLI server
-          echo "MGMT_BASE=${MGMT_BASE}" >> "$GITHUB_ENV"
-          echo "Using MGMT_BASE: ${MGMT_BASE}"
-          echo "Using PLATFORM_API: ${APIC_PLATFORM_API}"
-
-      - name: Login (prefer API key; supports no-apic-slim tar)
+          # APIC_BASE may be configured as .../manager; for CLI we need the mgmt root
+          MGMT_BASE="${APIC_BASE%/}"
+          MGMT_BASE="${MGMT_BASE%/manager}"
+          echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
+          echo "Using management base: $MGMT_BASE"
+      
+      - name: Login with API key (SaaS)
         shell: bash
         run: |
           set -euo pipefail
-          REALM="provider/${APIC_ORG}"
-
-          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
-            echo "🔐 SaaS login with API key"
-            apic login --sso --context provider \
-              --server  "${APIC_PLATFORM_API}" \
-              --apiKey  "${APIC_APIKEY}" \
-              --accept-license
-            # Sanity check (non-fatal) against MGMT_BASE (no /manager)
-            apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 10 >/dev/null || true
-            echo "✅ Logged in with API key."
-          else
-            echo "🧪 Falling back to user/password (on-prem only)"
-            apic login \
-              --server   "${MGMT_BASE}" \
-              --username "${APIC_USERNAME}" \
-              --password "${APIC_PASSWORD}" \
-              --realm    "${REALM}" \
-              --accept-license
-            echo "✅ Logged in with user/password."
+          # Login against the platform API (not the manager)
+          apic login --sso --context provider \
+            --server "${APIC_PLATFORM_API}" \
+            --apiKey "${APIC_APIKEY}" \
+            --accept-license
+          # Sanity: prove our token works against the MANAGEMENT base
+          echo "Sanity: listing orgs on MGMT..."
+          apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 20
+      
+      - name: Push draft API (create or update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_FILE="${{ github.event.inputs.api_file }}"
+          [ -s "$API_FILE" ] || { echo "::error::Missing $API_FILE"; exit 1; }
+          NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
+          VER=$(yq -r '.info.version' "$API_FILE")
+          ID="${NAME}:${VER}"
+          echo "➜ Upserting draft API ${ID}"
+      
+          # Preferred: update NAME:VERSION with FILE; fallback to create
+          if ! apic drafts:apis:update "${ID}" "$API_FILE" \
+                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            apic drafts:apis:create "$API_FILE" \
+                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
+          echo "✅ Draft API upserted."
 
       - name: Install yq (v4)
         shell: bash
@@ -127,8 +131,6 @@ jobs:
           curl -fsSL "https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_linux_amd64" -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
           yq --version
-
-
 
       - name: Push draft API (create or update)
         shell: bash
