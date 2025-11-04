@@ -34,6 +34,7 @@ jobs:
           done
 
       - name: Install APIC Toolkit (from repo file)
+        shell: bash
         run: |
           set -euo pipefail
           echo "📦 Installing IBM API Connect Toolkit from toolkit/toolkit-linux.tgz ..."
@@ -41,24 +42,27 @@ jobs:
           mkdir -p "$APIC_HOME"
           tar -xzf toolkit/toolkit-linux.tgz -C "$APIC_HOME"
 
-          # Find the apic binary inside the tarball (some builds put it at root, others under bin/)
+          # Locate the 'apic' binary (some archives put it at root, others under bin/)
           if [ -x "$APIC_HOME/apic" ]; then
             BIN="$APIC_HOME"
           elif [ -x "$APIC_HOME/bin/apic" ]; then
             BIN="$APIC_HOME/bin"
           else
             echo "::error::Could not find 'apic' binary after extraction."
-            find "$APIC_HOME" -maxdepth 2 -type f -name apic -ls || true
+            find "$APIC_HOME" -maxdepth 3 -type f -name apic -ls || true
             exit 1
           fi
 
+          # Make it available NOW (this step) and for subsequent steps
+          export PATH="$BIN:$PATH"
           echo "$BIN" >> "$GITHUB_PATH"
           echo "APIC_HOME=$APIC_HOME" >> "$GITHUB_ENV"
 
           echo "✅ Toolkit installed. Version:"
-          apic version
+          "$BIN/apic" version
 
       - name: Login to APIC
+        shell: bash
         run: |
           set -euo pipefail
           apic login \
@@ -69,6 +73,7 @@ jobs:
             --accept-license
 
       - name: Push draft API (create or update)
+        shell: bash
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
@@ -79,6 +84,7 @@ jobs:
           fi
 
       - name: Push draft Product (create or update)
+        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
@@ -89,6 +95,7 @@ jobs:
           fi
 
       - name: Publish product to catalog (stage)
+        shell: bash
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
