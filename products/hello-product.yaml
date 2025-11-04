@@ -44,3 +44,22 @@ visibility:
     enabled: true
     accounts:
       - all
+
+
+
+# # products/hello-product.yaml
+# product: 1.0.0
+# info:
+#   name: hello-product
+#   title: hello-product
+#   version: 1.0.0
+# gateways:
+#   - datapower-api-gateway
+# plans:
+#   default:
+#     title: Default
+#     rate-limit:
+#       value: 100/1hour
+# apis:
+#   - name: hello-proxy
+#     version: 1.0.0
