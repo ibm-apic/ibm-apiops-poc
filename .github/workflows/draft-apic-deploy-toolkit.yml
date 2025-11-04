@@ -90,24 +90,32 @@ jobs:
           echo "BASE=$BASE" >> "$GITHUB_ENV"
           echo "Using Manager base: $BASE"
 
-      - name: Login (prefer API key via apic-slim for SaaS)
+      - name: Login (prefer API key; supports no-apic-slim tar)
         shell: bash
         run: |
           set -euo pipefail
           REALM="provider/${APIC_ORG}"
-
-          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ] && [ -n "${APIC_SLIM:-}" ]; then
-            echo "🔐 SaaS login with API key via apic-slim (realm=$REALM)"
-            "$APIC_SLIM" login --sso \
-              --context provider \
-              --server  "${APIC_PLATFORM_API}" \
-              --apiKey  "${APIC_APIKEY}"
-
-            # quick sanity (401/403 => bad auth)
-            apic orgs:list --server "${BASE}" --accept-license | head -n 20 || {
-              echo "::error::API-key login appears unsuccessful. Check APIC_PLATFORM_API / APIC_APIKEY."
-              exit 1
-            }
+          BASE="${APIC_BASE%/}"
+        
+          have_slim=false
+          if [ -n "${APIC_SLIM:-}" ] && [ -x "${APIC_SLIM:-/nonexistent}" ]; then
+            have_slim=true
+          fi
+        
+          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
+            if $have_slim; then
+              echo "🔐 SaaS login with API key via apic-slim"
+              "${APIC_SLIM}" login --sso --context provider \
+                --server "${APIC_PLATFORM_API}" --apiKey "${APIC_APIKEY}"
+            else
+              echo "🔐 SaaS login with API key via apic (no apic-slim found)"
+              apic login --sso --context provider \
+                --server "${APIC_PLATFORM_API}" --apiKey "${APIC_APIKEY}" --accept-license
+            fi
+        
+            # sanity: 401/403 => auth problem
+            apic orgs:list --server "${BASE}" --accept-license | head -n 10 >/dev/null
+            echo "✅ Logged in with API key."
           else
             echo "🧪 Falling back to username/password (on-prem only)."
             apic login \
@@ -116,8 +124,9 @@ jobs:
               --password "${APIC_PASSWORD}" \
               --realm    "${REALM}" \
               --accept-license
+            echo "✅ Logged in with user/password."
           fi
-          echo "✅ Logged in."
+        
 
       - name: Push draft API (create or update)
         shell: bash
