@@ -102,18 +102,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "🔐 apic login (API key) against Platform API…"
           apic login --sso --context provider \
             --server  "${APIC_PLATFORM_API}" \
             --apiKey  "${APIC_APIKEY}" \
             --accept-license
-
-          echo "🧪 sanity: orgs:list (must include ${APIC_ORG})"
-          if ! apic orgs:list --server "${MGMT_BASE}" --accept-license | tee /tmp/orgs.txt | grep -q "${APIC_ORG}"; then
-            echo "::error::Login succeeded, but '${APIC_ORG}' not visible to this identity. Ensure the API key owner is a member of provider org '${APIC_ORG}' with an API management role."
+      
+          echo "🔎 sanity: orgs:list (must include ${APIC_ORG})"
+          apic orgs:list --server "${MGMT_BASE}" --accept-license | tee /tmp/orgs.txt
+      
+          if ! grep -q "^${APIC_ORG}\b" /tmp/orgs.txt; then
+            echo "::error::Login succeeded, but '${APIC_ORG}' is not visible to this identity."
+            echo "Ensure the API key owner is a MEMBER of provider org '${APIC_ORG}' with an API management role."
             exit 1
           fi
+      
           echo "✅ Logged in and provider org '${APIC_ORG}' is visible."
+
 
       - name: Push draft API (create or update)
         shell: bash
