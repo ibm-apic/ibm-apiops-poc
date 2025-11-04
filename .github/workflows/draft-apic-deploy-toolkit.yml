@@ -119,6 +119,16 @@ jobs:
             echo "✅ Logged in with user/password."
           fi
 
+      - name: Install yq (v4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="v4.44.3"
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_linux_amd64" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+
 
       - name: Push draft API (create or update)
         shell: bash
@@ -126,13 +136,21 @@ jobs:
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
           [ -s "$API_FILE" ] || { echo "::error::Missing $API_FILE"; exit 1; }
-        
-          if ! apic draft-apis:create "$API_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic draft-apis:update "$API_FILE" \
+      
+          NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
+          VER=$(yq -r '.info.version' "$API_FILE")
+          ID="${NAME}:${VER}"
+          echo "→ Upserting draft API ${ID}"
+      
+          # Preferred path for this toolkit: update takes NAME:VERSION + FILE
+          if ! apic draft-apis:update "${ID}" "${API_FILE}" \
+                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            # Some builds still offer create; try as a fallback
+            apic draft-apis:create "${API_FILE}" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
           echo "✅ Draft API upserted."
+
 
 
       - name: Push draft Product (create or update)
@@ -142,12 +160,18 @@ jobs:
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           [ -s "$PRODUCT_FILE" ] || { echo "::error::Missing $PRODUCT_FILE"; exit 1; }
       
-          if ! apic draft-products:create "$PRODUCT_FILE" \
-                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license ; then
-            apic draft-products:update "$PRODUCT_FILE" \
+          PNAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
+          PVER=$(yq -r '.info.version' "$PRODUCT_FILE")
+          PID="${PNAME}:${PVER}"
+          echo "→ Upserting draft Product ${PID}"
+      
+          if ! apic draft-products:update "${PID}" "${PRODUCT_FILE}" \
+                --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            apic draft-products:create "${PRODUCT_FILE}" \
                 --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license
           fi
           echo "✅ Draft Product upserted."
+
 
 
       - name: Publish product to catalog (stage)
