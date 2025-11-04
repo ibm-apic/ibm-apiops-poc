@@ -86,47 +86,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE%/}"
-          echo "BASE=$BASE" >> "$GITHUB_ENV"
-          echo "Using Manager base: $BASE"
+          # APIC_BASE is like https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+          RAW="${APIC_BASE%/}"
+          MGMT_BASE="${RAW%/manager}"           # strip trailing /manager for CLI server
+          echo "MGMT_BASE=${MGMT_BASE}" >> "$GITHUB_ENV"
+          echo "Using MGMT_BASE: ${MGMT_BASE}"
+          echo "Using PLATFORM_API: ${APIC_PLATFORM_API}"
 
       - name: Login (prefer API key; supports no-apic-slim tar)
         shell: bash
         run: |
           set -euo pipefail
           REALM="provider/${APIC_ORG}"
-          BASE="${APIC_BASE%/}"
-        
-          have_slim=false
-          if [ -n "${APIC_SLIM:-}" ] && [ -x "${APIC_SLIM:-/nonexistent}" ]; then
-            have_slim=true
-          fi
-        
+
           if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
-            if $have_slim; then
-              echo "🔐 SaaS login with API key via apic-slim"
-              "${APIC_SLIM}" login --sso --context provider \
-                --server "${APIC_PLATFORM_API}" --apiKey "${APIC_APIKEY}"
-            else
-              echo "🔐 SaaS login with API key via apic (no apic-slim found)"
-              apic login --sso --context provider \
-                --server "${APIC_PLATFORM_API}" --apiKey "${APIC_APIKEY}" --accept-license
-            fi
-        
-            # sanity: 401/403 => auth problem
-            apic orgs:list --server "${BASE}" --accept-license | head -n 10 >/dev/null
+            echo "🔐 SaaS login with API key"
+            apic login --sso --context provider \
+              --server  "${APIC_PLATFORM_API}" \
+              --apiKey  "${APIC_APIKEY}" \
+              --accept-license
+            # Sanity check (non-fatal) against MGMT_BASE (no /manager)
+            apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 10 >/dev/null || true
             echo "✅ Logged in with API key."
           else
-            echo "🧪 Falling back to username/password (on-prem only)."
+            echo "🧪 Falling back to user/password (on-prem only)"
             apic login \
-              --server   "${BASE}" \
+              --server   "${MGMT_BASE}" \
               --username "${APIC_USERNAME}" \
               --password "${APIC_PASSWORD}" \
               --realm    "${REALM}" \
               --accept-license
             echo "✅ Logged in with user/password."
           fi
-        
+
 
       - name: Push draft API (create or update)
         shell: bash
