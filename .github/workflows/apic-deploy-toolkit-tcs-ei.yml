@@ -22,12 +22,12 @@ jobs:
       APIC_BASE_TCS_EI:          ${{ secrets.APIC_BASE_TCS_EI }}           # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
       APIC_ORG_TCS_EI:           ${{ secrets.APIC_ORG_TCS_EI }}            # e.g. env9559876
       APIC_CATALOG_TCS_EI:       ${{ secrets.APIC_CATALOG_TCS_EI }}        # e.g. sandbox
-      APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}   # e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api
+      APIC_PLATFORM_API_TCS_EI:  ${{ secrets.APIC_PLATFORM_API_TCS_EI }}   # e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api
       APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}         # API key from “My API Keys”
 
       # Optional (ignored on SaaS unless you switch to basic auth)
-      APIC_USERNAME:      ${{ secrets.APIC_USERNAME }}
-      APIC_PASSWORD:      ${{ secrets.APIC_PASSWORD }}
+      APIC_USERNAME_TCS_EI:      ${{ secrets.APIC_USERNAME_TCS_EI }}
+      APIC_PASSWORD_TCS_EI:      ${{ secrets.APIC_PASSWORD_TCS_EI }}
 
     steps:
       - name: Checkout
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           miss=()
-          for v in APIC_BASE_TCS_EI APIC_ORG_TCS_EI APIC_CATALOG_TCS_EI APIC_PLATFORM_API APIC_APIKEY; do
+          for v in APIC_BASE_TCS_EI APIC_ORG_TCS_EI APIC_CATALOG_TCS_EI APIC_PLATFORM_API_TCS_EI APIC_APIKEY; do
             [ -n "${!v:-}" ] || miss+=("$v")
           done
           if [ ${#miss[@]} -gt 0 ]; then
@@ -96,7 +96,7 @@ jobs:
           MGMT_BASE="${RAW%/manager}"              # strip trailing /manager for CLI usage
           echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
           echo "Using MGMT_BASE: $MGMT_BASE"
-          echo "Platform API: $APIC_PLATFORM_API"
+          echo "Platform API: $APIC_PLATFORM_API_TCS_EI"
 
       - name: Login (prefer API key; supports no-apic-slim tar)
         shell: bash
@@ -104,10 +104,10 @@ jobs:
           set -euo pipefail
           REALM="provider/${APIC_ORG_TCS_EI}"
 
-          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
+          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API_TCS_EI:-}" ]; then
             echo "🔐 SaaS login with API key"
             apic login --sso --context provider \
-              --server  "${APIC_PLATFORM_API}" \
+              --server  "${APIC_PLATFORM_API_TCS_EI}" \
               --apiKey  "${APIC_APIKEY}" \
               --accept-license
             # Sanity check (non-fatal) against MGMT_BASE (no /manager)
@@ -117,8 +117,8 @@ jobs:
             echo "🧪 Falling back to user/password (on-prem only)"
             apic login \
               --server   "${MGMT_BASE}" \
-              --username "${APIC_USERNAME}" \
-              --password "${APIC_PASSWORD}" \
+              --username "${APIC_USERNAME_TCS_EI}" \
+              --password "${APIC_PASSWORD_TCS_EI}" \
               --realm    "${REALM}" \
               --accept-license
             echo "✅ Logged in with user/password."
