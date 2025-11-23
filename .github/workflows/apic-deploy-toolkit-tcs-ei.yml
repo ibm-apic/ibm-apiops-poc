@@ -1,0 +1,216 @@
+name: APIC Deploy via Toolkit (SaaS-ready)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_file:
+        description: "Path to API YAML"
+        default: "apis/hello-proxy.yaml"
+        required: true
+      product_file:
+        description: "Path to Product YAML"
+        default: "products/hello-product.yaml"
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy draft API & Product, then publish
+    runs-on: ubuntu-latest
+
+    env:
+      # REQUIRED (set as repo secrets)
+      APIC_BASE:          ${{ secrets.APIC_BASE }}           # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      APIC_ORG:           ${{ secrets.APIC_ORG }}            # e.g. env9559876
+      APIC_CATALOG:       ${{ secrets.APIC_CATALOG }}        # e.g. sandbox
+      APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}   # e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api
+      APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}         # API key from “My API Keys”
+
+      # Optional (ignored on SaaS unless you switch to basic auth)
+      APIC_USERNAME:      ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD:      ${{ secrets.APIC_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          miss=()
+          for v in APIC_BASE APIC_ORG APIC_CATALOG APIC_PLATFORM_API APIC_APIKEY; do
+            [ -n "${!v:-}" ] || miss+=("$v")
+          done
+          if [ ${#miss[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets/env: ${miss[*]}"
+            exit 1
+          fi
+
+      - name: Install yq (v4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Install APIC Toolkit from repo (toolkit/toolkit-linux.tgz)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAR="toolkit/toolkit-linux.tgz"
+          if [ ! -s "$TAR" ]; then
+            echo "::error::Expected $TAR in repo at $TAR"
+            exit 1
+          fi
+
+          APIC_HOME="$(mktemp -d)/apic-toolkit"
+          mkdir -p "$APIC_HOME"
+          tar -xzf "$TAR" -C "$APIC_HOME"
+
+          for C in "$APIC_HOME/apic" "$APIC_HOME/bin/apic"; do
+            [ -x "$C" ] && APIC_BIN="$C"
+          done
+          for C in "$APIC_HOME/apic-slim" "$APIC_HOME/bin/apic-slim"; do
+            [ -x "$C" ] && APIC_SLIM="$C"
+          done
+
+          if [ -z "${APIC_BIN:-}" ]; then
+            echo "::error::Could not find 'apic' binary in toolkit payload"
+            find "$APIC_HOME" -maxdepth 2 -type f -name 'apic*' -printf '%p\n' || true
+            exit 1
+          fi
+
+          echo "$(dirname "$APIC_BIN")" >> "$GITHUB_PATH"
+          echo "APIC_HOME=$APIC_HOME"     >> "$GITHUB_ENV"
+          echo "APIC_BIN=$APIC_BIN"       >> "$GITHUB_ENV"
+          echo "APIC_SLIM=${APIC_SLIM:-}" >> "$GITHUB_ENV"
+
+          apic --accept-license version || true
+
+      - name: Normalize management base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW="${APIC_BASE%/}"
+          MGMT_BASE="${RAW%/manager}"              # strip trailing /manager for CLI usage
+          echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
+          echo "Using MGMT_BASE: $MGMT_BASE"
+          echo "Platform API: $APIC_PLATFORM_API"
+
+      - name: Login (prefer API key; supports no-apic-slim tar)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REALM="provider/${APIC_ORG}"
+
+          if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
+            echo "🔐 SaaS login with API key"
+            apic login --sso --context provider \
+              --server  "${APIC_PLATFORM_API}" \
+              --apiKey  "${APIC_APIKEY}" \
+              --accept-license
+            # Sanity check (non-fatal) against MGMT_BASE (no /manager)
+            apic orgs:list --server "${MGMT_BASE}" --accept-license | head -n 10 >/dev/null || true
+            echo "✅ Logged in with API key."
+          else
+            echo "🧪 Falling back to user/password (on-prem only)"
+            apic login \
+              --server   "${MGMT_BASE}" \
+              --username "${APIC_USERNAME}" \
+              --password "${APIC_PASSWORD}" \
+              --realm    "${REALM}" \
+              --accept-license
+            echo "✅ Logged in with user/password."
+          fi
+
+      - name: Push draft API (create or update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_FILE="${{ github.event.inputs.api_file }}"
+          [ -s "$API_FILE" ] || { echo "::error::Missing file: $API_FILE"; exit 1; }
+
+          NAME=$(yq -r '.info.name // .info.title // .title' "$API_FILE")
+          VER=$(yq -r '.info.version' "$API_FILE")
+          ID="${NAME}:${VER}"
+          echo "→ Upserting draft API ${ID}"
+
+          try_upsert() {
+            # Try both command shapes to match toolkit builds
+            if apic draft-apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            # Fallback to create (older builds)
+            if apic draft-apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            return 1
+          }
+
+          if ! try_upsert; then
+            echo "⚠️ First attempt failed, sleeping 2s then retry once (handles rare token propagation glitches)…"
+            sleep 2
+            if ! try_upsert; then
+              echo "::error::Draft API upsert failed. If you see 'Unauthorized', verify the API key owner has API Management **user/admin** in provider org '${APIC_ORG}'."
+              exit 1
+            fi
+          fi
+          echo "✅ Draft API upserted."
+
+      - name: Push draft Product (create or update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODUCT_FILE="${{ github.event.inputs.product_file }}"
+          [ -s "$PRODUCT_FILE" ] || { echo "::error::Missing file: $PRODUCT_FILE"; exit 1; }
+
+          PNAME=$(yq -r '.info.name // .info.title // .title' "$PRODUCT_FILE")
+          PVER=$(yq -r '.info.version' "$PRODUCT_FILE")
+          PID="${PNAME}:${PVER}"
+          echo "→ Upserting draft Product ${PID}"
+
+          try_upsert_prod() {
+            if apic draft-products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic draft-products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            if apic drafts:products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+              return 0
+            fi
+            return 1
+          }
+
+          if ! try_upsert_prod; then
+            echo "⚠️ First attempt failed, sleeping 2s then retry once…"
+            sleep 2
+            if ! try_upsert_prod; then
+              echo "::error::Draft Product upsert failed. If you see 'Unauthorized', verify API-key user’s role in provider org '${APIC_ORG}'."
+              exit 1
+            fi
+          fi
+          echo "✅ Draft Product upserted."
+
+      - name: Publish product to catalog (stage)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODUCT_FILE="${{ github.event.inputs.product_file }}"
+          apic products:publish "$PRODUCT_FILE" \
+            --server  "${MGMT_BASE}" \
+            --org     "${APIC_ORG}" \
+            --catalog "${APIC_CATALOG}" \
+            --stage \
+            --accept-license
+          echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
