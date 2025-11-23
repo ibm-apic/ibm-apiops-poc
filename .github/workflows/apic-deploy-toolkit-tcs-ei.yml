@@ -19,9 +19,9 @@ jobs:
 
     env:
       # REQUIRED (set as repo secrets)
-      APIC_BASE:          ${{ secrets.APIC_BASE }}           # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
-      APIC_ORG:           ${{ secrets.APIC_ORG }}            # e.g. env9559876
-      APIC_CATALOG:       ${{ secrets.APIC_CATALOG }}        # e.g. sandbox
+      APIC_BASE_TCS_EI:          ${{ secrets.APIC_BASE_TCS_EI }}           # e.g. https://env9559876.a-vir-c1.apiconnect.ipaas.automation.ibm.com/manager
+      APIC_ORG_TCS_EI:           ${{ secrets.APIC_ORG_TCS_EI }}            # e.g. env9559876
+      APIC_CATALOG_TCS_EI:       ${{ secrets.APIC_CATALOG_TCS_EI }}        # e.g. sandbox
       APIC_PLATFORM_API:  ${{ secrets.APIC_PLATFORM_API }}   # e.g. https://platform-api.us-east-a.apiconnect.automation.ibm.com/api
       APIC_APIKEY:        ${{ secrets.APIC_APIKEY }}         # API key from “My API Keys”
 
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           miss=()
-          for v in APIC_BASE APIC_ORG APIC_CATALOG APIC_PLATFORM_API APIC_APIKEY; do
+          for v in APIC_BASE_TCS_EI APIC_ORG_TCS_EI APIC_CATALOG_TCS_EI APIC_PLATFORM_API APIC_APIKEY; do
             [ -n "${!v:-}" ] || miss+=("$v")
           done
           if [ ${#miss[@]} -gt 0 ]; then
@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RAW="${APIC_BASE%/}"
+          RAW="${APIC_BASE_TCS_EI%/}"
           MGMT_BASE="${RAW%/manager}"              # strip trailing /manager for CLI usage
           echo "MGMT_BASE=$MGMT_BASE" >> "$GITHUB_ENV"
           echo "Using MGMT_BASE: $MGMT_BASE"
@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REALM="provider/${APIC_ORG}"
+          REALM="provider/${APIC_ORG_TCS_EI}"
 
           if [ -n "${APIC_APIKEY:-}" ] && [ -n "${APIC_PLATFORM_API:-}" ]; then
             echo "🔐 SaaS login with API key"
@@ -138,17 +138,17 @@ jobs:
 
           try_upsert() {
             # Try both command shapes to match toolkit builds
-            if apic draft-apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic draft-apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
-            if apic drafts:apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic drafts:apis:update "${ID}" "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
             # Fallback to create (older builds)
-            if apic draft-apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic draft-apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
-            if apic drafts:apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic drafts:apis:create "${API_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
             return 1
@@ -158,7 +158,7 @@ jobs:
             echo "⚠️ First attempt failed, sleeping 2s then retry once (handles rare token propagation glitches)…"
             sleep 2
             if ! try_upsert; then
-              echo "::error::Draft API upsert failed. If you see 'Unauthorized', verify the API key owner has API Management **user/admin** in provider org '${APIC_ORG}'."
+              echo "::error::Draft API upsert failed. If you see 'Unauthorized', verify the API key owner has API Management **user/admin** in provider org '${APIC_ORG_TCS_EI}'."
               exit 1
             fi
           fi
@@ -177,16 +177,16 @@ jobs:
           echo "→ Upserting draft Product ${PID}"
 
           try_upsert_prod() {
-            if apic draft-products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic draft-products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
-            if apic drafts:products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic drafts:products:update "${PID}" "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
-            if apic draft-products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic draft-products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
-            if apic drafts:products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG}" --accept-license; then
+            if apic drafts:products:create "${PRODUCT_FILE}" --server "${MGMT_BASE}" --org "${APIC_ORG_TCS_EI}" --accept-license; then
               return 0
             fi
             return 1
@@ -196,7 +196,7 @@ jobs:
             echo "⚠️ First attempt failed, sleeping 2s then retry once…"
             sleep 2
             if ! try_upsert_prod; then
-              echo "::error::Draft Product upsert failed. If you see 'Unauthorized', verify API-key user’s role in provider org '${APIC_ORG}'."
+              echo "::error::Draft Product upsert failed. If you see 'Unauthorized', verify API-key user’s role in provider org '${APIC_ORG_TCS_EI}'."
               exit 1
             fi
           fi
@@ -209,8 +209,8 @@ jobs:
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
           apic products:publish "$PRODUCT_FILE" \
             --server  "${MGMT_BASE}" \
-            --org     "${APIC_ORG}" \
-            --catalog "${APIC_CATALOG}" \
+            --org     "${APIC_ORG_TCS_EI}" \
+            --catalog "${APIC_CATALOG_TCS_EI}" \
             --stage \
             --accept-license
-          echo "🎉 Product published to '${APIC_CATALOG}' (staged)."
+          echo "🎉 Product published to '${APIC_CATALOG_TCS_EI}' (staged)."
