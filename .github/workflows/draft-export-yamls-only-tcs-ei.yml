@@ -1,0 +1,127 @@
+name: APIC Export (pure specs) - tcs-ei
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "draft or catalog"
+        required: true
+        default: "draft"
+      api_name:
+        description: "API name (e.g. hello-proxyy)"
+        default: "hello-proxyy"
+        required: true
+      api_version:
+        description: "API version (e.g. 1.0.0)"
+        default: "1.0.0"
+        required: true
+      product_name:
+        description: "Product name (optional)"
+        default: "hello-productt"
+        required: false
+      product_version:
+        description: "Product version (optional)"
+        default: "1.0.0"
+        required: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      APIC_BASE:     ${{ secrets.APIC_BASE }}
+      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
+      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
+      APIC_ORG:      ${{ secrets.APIC_ORG }}
+      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Authenticate with APIC (basic/cookie) – keep this as you have it
+      - name: Get APIC auth (basic/cookie)
+        id: auth
+        run: |
+          set -euo pipefail
+          BASE="${APIC_BASE}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
+          # Try basic
+          if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
+            echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # Try cookie
+          COOKIE=/tmp/apic_cookie.txt
+          if curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
+               -X POST "$BASE/login" -H 'Content-Type: application/json' \
+               --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}" | grep -qE '^(200|204)$'; then
+            echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "::error::Auth failed"; exit 1
+        
+        #  Export draft API as YAML
+      - name: Export draft API as YAML
+        run: |
+          set -euo pipefail
+          mkdir -p export/apis
+          API_NAME="${{ github.event.inputs.api_name }}"
+          API_VER="${{ github.event.inputs.api_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          echo "GET $URL"
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/apis/${API_NAME}_${API_VER}.yaml"
+          file "export/apis/${API_NAME}_${API_VER}.yaml" || true
+          head -n 25 "export/apis/${API_NAME}_${API_VER}.yaml" || true
+        
+        #  Export draft Product as YAML (optional)
+      - name: Export draft Product as YAML (optional)
+        if: ${{ github.event.inputs.product_name != '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p export/products
+          PROD="${{ github.event.inputs.product_name }}"
+          PVER="${{ github.event.inputs.product_version }}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          echo "GET $URL"
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/yaml' \
+            "$URL" -o "export/products/${PROD}_${PVER}.yaml"
+          file "export/products/${PROD}_${PVER}.yaml" || true
+          head -n 25 "export/products/${PROD}_${PVER}.yaml" || true
+        
+      - name: Export catalog summary (for portability hints)
+        run: |
+          set -euo pipefail
+          mkdir -p export/catalog
+      
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/catalogs/${APIC_CATALOG}"
+      
+          # Fetch and capture headers + body
+          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+            -H 'Accept: application/json' \
+            -D /tmp/cat.h \
+            -o "export/catalog/${APIC_CATALOG}.raw.json" \
+            "$URL"
+      
+          # Ensure we actually got JSON (not an HTML page)
+          if ! grep -i '^content-type:.*application/json' /tmp/cat.h >/dev/null; then
+            echo "::error::Catalog endpoint did not return JSON. Check URL or auth."
+            echo "----- response preview -----"
+            head -c 400 "export/catalog/${APIC_CATALOG}.raw.json" || true
+            echo
+            exit 1
+          fi
+      
+          # Trim to just the useful bits
+          jq '{name, title, gateway_endpoints: .settings.gateway_endpoints, portal, space_admins, subscription_config}' \
+            "export/catalog/${APIC_CATALOG}.raw.json" \
+            > "export/catalog/${APIC_CATALOG}.json"
+      
+          rm -f "export/catalog/${APIC_CATALOG}.raw.json"
+          cat "export/catalog/${APIC_CATALOG}.json"
+
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apic-export
+          path: export/
