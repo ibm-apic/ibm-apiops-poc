@@ -28,11 +28,11 @@ jobs:
   export:
     runs-on: ubuntu-latest
     env:
-      APIC_BASE:     ${{ secrets.APIC_BASE }}
-      APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
-      APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
-      APIC_ORG:      ${{ secrets.APIC_ORG }}
-      APIC_CATALOG:  ${{ secrets.APIC_CATALOG }}
+      APIC_BASE_TCS_EI:     ${{ secrets.APIC_BASE_TCS_EI }}
+      APIC_USERNAME_TCS_EI: ${{ secrets.APIC_USERNAME_TCS_EI }}
+      APIC_PASSWORD_TCS_EI: ${{ secrets.APIC_PASSWORD_TCS_EI }}
+      APIC_ORG_TCS_EI:      ${{ secrets.APIC_ORG_TCS_EI }}
+      APIC_CATALOG_TCS_EI:  ${{ secrets.APIC_CATALOG_TCS_EI }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
         id: auth
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
+          BASE="${APIC_BASE_TCS_EI}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
           # Try basic
           if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
@@ -64,7 +64,7 @@ jobs:
           mkdir -p export/apis
           API_NAME="${{ github.event.inputs.api_name }}"
           API_VER="${{ github.event.inputs.api_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
@@ -80,7 +80,7 @@ jobs:
           mkdir -p export/products
           PROD="${{ github.event.inputs.product_name }}"
           PVER="${{ github.event.inputs.product_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
@@ -93,31 +93,31 @@ jobs:
           set -euo pipefail
           mkdir -p export/catalog
       
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/catalogs/${APIC_CATALOG}"
+          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/catalogs/${APIC_CATALOG_TCS_EI}"
       
           # Fetch and capture headers + body
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/json' \
             -D /tmp/cat.h \
-            -o "export/catalog/${APIC_CATALOG}.raw.json" \
+            -o "export/catalog/${APIC_CATALOG_TCS_EI}.raw.json" \
             "$URL"
       
           # Ensure we actually got JSON (not an HTML page)
           if ! grep -i '^content-type:.*application/json' /tmp/cat.h >/dev/null; then
             echo "::error::Catalog endpoint did not return JSON. Check URL or auth."
             echo "----- response preview -----"
-            head -c 400 "export/catalog/${APIC_CATALOG}.raw.json" || true
+            head -c 400 "export/catalog/${APIC_CATALOG_TCS_EI}.raw.json" || true
             echo
             exit 1
           fi
       
           # Trim to just the useful bits
           jq '{name, title, gateway_endpoints: .settings.gateway_endpoints, portal, space_admins, subscription_config}' \
-            "export/catalog/${APIC_CATALOG}.raw.json" \
-            > "export/catalog/${APIC_CATALOG}.json"
+            "export/catalog/${APIC_CATALOG_TCS_EI}.raw.json" \
+            > "export/catalog/${APIC_CATALOG_TCS_EI}.json"
       
-          rm -f "export/catalog/${APIC_CATALOG}.raw.json"
-          cat "export/catalog/${APIC_CATALOG}.json"
+          rm -f "export/catalog/${APIC_CATALOG_TCS_EI}.raw.json"
+          cat "export/catalog/${APIC_CATALOG_TCS_EI}.json"
 
 
       - name: Upload artifact
