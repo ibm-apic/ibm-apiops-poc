@@ -32,66 +32,66 @@ jobs:
           echo "API:     ${{ github.event.inputs.api_file }}"
           echo "Product: ${{ github.event.inputs.product_file }}"
 
-      # # Authenticate with APIC (Basic or Cookie mode)
-      # - name: Get APIC auth (basic/cookie)
-      #   id: auth
-      #   run: |
-      #     set -euo pipefail
-      #     BASE="${APIC_BASE_TCS_EI}"
-      #     USER="${APIC_USERNAME_TCS_EI}"
-      #     PASS="${APIC_PASSWORD_TCS_EI}"
-
-      #     echo " Checking Basic authentication..."
-      #     STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -u "$USER:$PASS" "$BASE/api/orgs")
-      #     if [ "$STATUS" = "200" ]; then
-      #       echo " Using Basic authentication"
-      #       echo "mode=basic" >> $GITHUB_OUTPUT
-      #       echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
-      #       exit 0
-      #     fi
-
-      #     echo " Trying Cookie-based authentication..."
-      #     COOKIE=/tmp/apic_cookie.txt
-      #     LOGIN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
-      #       -c "$COOKIE" -b "$COOKIE" \
-      #       -X POST "$BASE/login" \
-      #       -H 'Content-Type: application/json' \
-      #       --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}")
-
-      #     if [ "$LOGIN_STATUS" = "200" ] || [ "$LOGIN_STATUS" = "204" ]; then
-      #       STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")
-      #       if [ "$STATUS" = "200" ]; then
-      #         echo " Using Cookie authentication"
-      #         echo "mode=cookie" >> $GITHUB_OUTPUT
-      #         echo "cookie_path=$COOKIE" >> $GITHUB_OUTPUT
-      #         echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
-      #         exit 0
-      #       fi
-      #     fi
-
-      #     echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE_TCS_EI/credentials."
-      #     exit 1
-
-        # Authenticate with APIC (basic/cookie) – keep this as you have it
+      # Authenticate with APIC (Basic or Cookie mode)
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE_MANAGER_TCS_EI}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
-          # Try basic
-          if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
+          BASE="${APIC_BASE_TCS_EI}"
+          USER="${APIC_USERNAME_TCS_EI}"
+          PASS="${APIC_PASSWORD_TCS_EI}"
+
+          echo " Checking Basic authentication..."
+          STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -u "$USER:$PASS" "$BASE/api/orgs")
+          if [ "$STATUS" = "200" ]; then
+            echo " Using Basic authentication"
+            echo "mode=basic" >> $GITHUB_OUTPUT
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
             exit 0
           fi
-          # Try cookie
+
+          echo " Trying Cookie-based authentication..."
           COOKIE=/tmp/apic_cookie.txt
-          if curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
-               -X POST "$BASE/login" -H 'Content-Type: application/json' \
-               --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}" | grep -qE '^(200|204)$'; then
-            echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
-            exit 0
+          LOGIN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
+            -c "$COOKIE" -b "$COOKIE" \
+            -X POST "$BASE/login" \
+            -H 'Content-Type: application/json' \
+            --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}")
+
+          if [ "$LOGIN_STATUS" = "200" ] || [ "$LOGIN_STATUS" = "204" ]; then
+            STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -c "$COOKIE" -b "$COOKIE" "$BASE/api/orgs")
+            if [ "$STATUS" = "200" ]; then
+              echo " Using Cookie authentication"
+              echo "mode=cookie" >> $GITHUB_OUTPUT
+              echo "cookie_path=$COOKIE" >> $GITHUB_OUTPUT
+              echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
+              exit 0
+            fi
           fi
-          echo "::error::Auth failed"; exit 1
+
+          echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE_TCS_EI/credentials."
+          exit 1
+
+      #   # Authenticate with APIC (basic/cookie) – keep this as you have it
+      # - name: Get APIC auth (basic/cookie)
+      #   id: auth
+      #   run: |
+      #     set -euo pipefail
+      #     BASE="${APIC_BASE_MANAGER_TCS_EI}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
+      #     # Try basic
+      #     if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
+      #       echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
+      #       exit 0
+      #     fi
+      #     # Try cookie
+      #     COOKIE=/tmp/apic_cookie.txt
+      #     if curl -sk -o /dev/null -w '%{http_code}' -c "$COOKIE" -b "$COOKIE" \
+      #          -X POST "$BASE/login" -H 'Content-Type: application/json' \
+      #          --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}" | grep -qE '^(200|204)$'; then
+      #       echo "curl_auth=-c '$COOKIE' -b '$COOKIE'" >> $GITHUB_OUTPUT
+      #       exit 0
+      #     fi
+      #     echo "::error::Auth failed"; exit 1
 
       - name: Install yq (YAML parser)
         run: |
