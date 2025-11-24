@@ -1,65 +1,31 @@
-product: 1.0.0
 info:
-  name: hello-product
-  title: Hello Product
-  version: 1.0.0
-  summary: Product bundling the Hello Proxy API for testing
-  description: >
-    Exposes the Hello Proxy API through the DataPower Gateway. 
-    Requires application subscription for invocation.
-  contact:
-    name: API Platform Team
-    email: apiteam@example.com
-  license:
-    name: Apache 2.0
-    url: https://www.apache.org/licenses/LICENSE-2.0.html
-
+  version: '1.0.0'
+  title: 'hello-productt'
+  name: 'hello-productt'
 gateways:
-  - datapower-api-gateway
-
+  - 'datapower-api-gateway'
 plans:
-  default:
-    title: Default Plan
-    description: Requires app subscription to call the Hello Proxy API
-    rate-limit:
-      value: 100/minute
+  default-plan:
+    title: 'Default Plan'
+    description: 'Default Plan'
+    rate-limits:
+      default:
+        value: '100/1hour'
+        hard-limit: true
     apis:
-      hello-proxy:
-        operations:
-          - "*"
-    approval: false
-    subscribe: true
-
+      hello-proxy1.0.0: {}
 apis:
-  hello-proxy:
-    name: hello-proxy
-    version: 1.0.0
-    ref: ../apis/hello-proxy.yaml
-    gateway-type: datapower-api-gateway
-
+  hello-proxy1.0.0:
+    name: 'hello-proxyy:1.0.0'
 visibility:
   view:
+    type: 'public'
+    orgs: []
+    tags: []
     enabled: true
   subscribe:
+    type: 'authenticated'
+    orgs: []
+    tags: []
     enabled: true
-    accounts:
-      - all
-
-
-
-# # products/hello-product.yaml
-# product: 1.0.0
-# info:
-#   name: hello-product
-#   title: hello-product
-#   version: 1.0.0
-# gateways:
-#   - datapower-api-gateway
-# plans:
-#   default:
-#     title: Default
-#     rate-limit:
-#       value: 100/1hour
-# apis:
-#   - name: hello-proxy
-#     version: 1.0.0
+product: '1.0.0'
