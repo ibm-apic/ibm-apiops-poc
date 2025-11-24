@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APIC_BASE_TCS_EI: ${{ secrets.APIC_BASE_TCS_EI }}        # e.g. https://<env>.../manager
-      APIC_BASE_MANAGER: ${{ secrets.APIC_BASE_MANAGER }}        # e.g. https://<env>...
+      APIC_BASE_MANAGER_TCS_EI: ${{ secrets.APIC_BASE_MANAGER_TCS_EI }}        # e.g. https://<env>...
       APIC_USERNAME_TCS_EI: ${{ secrets.APIC_USERNAME_TCS_EI }}
       APIC_PASSWORD_TCS_EI: ${{ secrets.APIC_PASSWORD_TCS_EI }}
       APIC_ORG_TCS_EI: ${{ secrets.APIC_ORG_TCS_EI }}          # e.g. try-ai
@@ -72,12 +72,12 @@ jobs:
       #     echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE_TCS_EI/credentials."
       #     exit 1
 
-        # Authenticate with APIC (basic/cookie) – keep this as you have it
+      # Authenticate with APIC (basic/cookie) – keep this as you have it
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE_TCS_EI_MANAGER}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
+          BASE="${APIC_BASE_MANAGER_TCS_EI}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
           # Try basic
           if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
