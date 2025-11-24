@@ -57,6 +57,29 @@ jobs:
             exit 0
           fi
           echo "::error::Auth failed"; exit 1
+
+      # Get APIC access token (Bearer) from platform-api
+      - name: Get APIC bearer token
+        id: token
+        env:
+          APIC_API_KEY: ${{ secrets.APIC_API_KEY }}
+          APIC_CLIENT_ID: ${{ secrets.APIC_CLIENT_ID }}
+          APIC_CLIENT_SECRET: ${{ secrets.APIC_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -skL 'https://platform-api.us-east-a.apiconnect.automation.ibm.com/api/token' \
+            -H 'Content-Type: application/json' \
+            --data "{
+              \"api_key\": \"${APIC_API_KEY}\",
+              \"grant_type\": \"api_key\",
+              \"client_id\": \"${APIC_CLIENT_ID}\",
+              \"client_secret\": \"${APIC_CLIENT_SECRET}\"
+            }" | jq -r '.access_token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Failed to obtain APIC access token"
+            exit 1
+          fi
+          echo "access_token=${TOKEN}" >> $GITHUB_OUTPUT
         
         #  Export draft API as YAML
       - name: Export draft API as YAML
@@ -65,9 +88,10 @@ jobs:
           mkdir -p export/apis
           API_NAME="${{ github.event.inputs.api_name }}"
           API_VER="${{ github.event.inputs.api_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}/${API_VER}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}/${API_VER}/document"
           echo "GET $URL"
-          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+          curl -skL \
+            -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H 'Accept: application/yaml' \
             "$URL" -o "export/apis/${API_NAME}_${API_VER}.yaml"
           file "export/apis/${API_NAME}_${API_VER}.yaml" || true
@@ -81,9 +105,10 @@ jobs:
           mkdir -p export/products
           PROD="${{ github.event.inputs.product_name }}"
           PVER="${{ github.event.inputs.product_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}/${PVER}"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}/${PVER}/document"
           echo "GET $URL"
-          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+          curl -skL \
+            -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H 'Accept: application/yaml' \
             "$URL" -o "export/products/${PROD}_${PVER}.yaml"
           file "export/products/${PROD}_${PVER}.yaml" || true
@@ -97,7 +122,8 @@ jobs:
           URL="${APIC_BASE}/api/orgs/${APIC_ORG}/catalogs/${APIC_CATALOG}"
       
           # Fetch and capture headers + body
-          curl -skL ${{ steps.auth.outputs.curl_auth }} \
+          curl -skL \
+            -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H 'Accept: application/json' \
             -D /tmp/cat.h \
             -o "export/catalog/${APIC_CATALOG}.raw.json" \
