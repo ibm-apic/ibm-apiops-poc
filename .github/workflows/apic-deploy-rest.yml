@@ -111,9 +111,13 @@ jobs:
           echo "API file: $API_FILE"
           echo "Parsed name: $NAME, version: $VER"
 
-          EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
-          EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis?replace=true"
-          EP3="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis/${NAME}/${VER}"
+          # EP1="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
+          # EP2="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis?replace=true"
+          # EP3="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/apis/${NAME}/${VER}"
+
+          EP1="${APIC_BASE_MANAGER}/api/orgs/${APIC_ORG}/drafts/draft-apis?replace=true"
+          EP2="${APIC_BASE_MANAGER}/api/orgs/${APIC_ORG}/drafts/apis?replace=true"
+          EP3="${APIC_BASE_MANAGER}/api/orgs/${APIC_ORG}/drafts/apis/${NAME}/${VER}"
 
           post_yaml() {
             local url="$1"
