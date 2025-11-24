@@ -1,4 +1,4 @@
-name: APIC Deploy via REST
+name: APIC Import (pure specs)
 
 on:
   workflow_dispatch:
