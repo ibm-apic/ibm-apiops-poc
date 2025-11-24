@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APIC_BASE:     ${{ secrets.APIC_BASE }}
+      APIC_BASE_MANAGER:     ${{ secrets.APIC_BASE_MANAGER }}
       APIC_USERNAME: ${{ secrets.APIC_USERNAME }}
       APIC_PASSWORD: ${{ secrets.APIC_PASSWORD }}
       APIC_ORG:      ${{ secrets.APIC_ORG }}
@@ -41,7 +42,7 @@ jobs:
         id: auth
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
+          BASE="${APIC_BASE_MANAGER}"; USER="${APIC_USERNAME}"; PASS="${APIC_PASSWORD}"
           # Try basic
           if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
@@ -64,7 +65,7 @@ jobs:
           mkdir -p export/apis
           API_NAME="${{ github.event.inputs.api_name }}"
           API_VER="${{ github.event.inputs.api_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-apis/${API_NAME}/${API_VER}"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
@@ -80,7 +81,7 @@ jobs:
           mkdir -p export/products
           PROD="${{ github.event.inputs.product_name }}"
           PVER="${{ github.event.inputs.product_version }}"
-          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          URL="${APIC_BASE}/api/orgs/${APIC_ORG}/drafts/draft-products/${PROD}/${PVER}"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
