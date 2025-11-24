@@ -64,7 +64,7 @@ jobs:
           mkdir -p export/apis
           API_NAME="${{ github.event.inputs.api_name }}"
           API_VER="${{ github.event.inputs.api_version }}"
-          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-apis/${API_NAME}:${API_VER}?format=yaml"
+          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-apis/${API_NAME}/${API_VER}"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
@@ -80,7 +80,7 @@ jobs:
           mkdir -p export/products
           PROD="${{ github.event.inputs.product_name }}"
           PVER="${{ github.event.inputs.product_version }}"
-          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-products/${PROD}:${PVER}?format=yaml"
+          URL="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-products/${PROD}/${PVER}"
           echo "GET $URL"
           curl -skL ${{ steps.auth.outputs.curl_auth }} \
             -H 'Accept: application/yaml' \
