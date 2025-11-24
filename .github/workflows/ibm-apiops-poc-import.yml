@@ -1,4 +1,4 @@
-name: APIC Import (pure specs)
+name: APIC Deploy via REST
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APIC_BASE_TCS_EI: ${{ secrets.APIC_BASE_TCS_EI }}        # e.g. https://<env>.../manager
-      APIC_BASE_MANAGER_TCS_EI_: ${{ secrets.APIC_BASE_MANAGER_TCS_EI }}        # e.g. https://<env>...
+      APIC_BASE_MANAGER_TCS_EI: ${{ secrets.APIC_BASE_MANAGER_TCS_EI }}        # e.g. https://<env>...
       APIC_USERNAME_TCS_EI: ${{ secrets.APIC_USERNAME_TCS_EI }}
       APIC_PASSWORD_TCS_EI: ${{ secrets.APIC_PASSWORD_TCS_EI }}
       APIC_ORG_TCS_EI: ${{ secrets.APIC_ORG_TCS_EI }}          # e.g. try-ai
@@ -37,9 +37,9 @@ jobs:
       #   id: auth
       #   run: |
       #     set -euo pipefail
-      #     BASE="${APIC_BASE_TCS_EI_TCS_EI}"
-      #     USER="${APIC_USERNAME_TCS_EI_TCS_EI}"
-      #     PASS="${APIC_PASSWORD_TCS_EI_TCS_EI}"
+      #     BASE="${APIC_BASE_TCS_EI}"
+      #     USER="${APIC_USERNAME_TCS_EI}"
+      #     PASS="${APIC_PASSWORD_TCS_EI}"
 
       #     echo " Checking Basic authentication..."
       #     STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -u "$USER:$PASS" "$BASE/api/orgs")
@@ -69,15 +69,15 @@ jobs:
       #       fi
       #     fi
 
-      #     echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE_TCS_EI_TCS_EI/credentials."
+      #     echo "::error::Authentication failed (basic and cookie both failed). Check APIC_BASE_TCS_EI/credentials."
       #     exit 1
 
-      # Authenticate with APIC (basic/cookie) – keep this as you have it
+        # Authenticate with APIC (basic/cookie) – keep this as you have it
       - name: Get APIC auth (basic/cookie)
         id: auth
         run: |
           set -euo pipefail
-          BASE="${APIC_BASE_TCS_EI}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
+          BASE="${APIC_BASE_MANAGER_TCS_EI}"; USER="${APIC_USERNAME_TCS_EI}"; PASS="${APIC_PASSWORD_TCS_EI}"
           # Try basic
           if [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "$USER:$PASS" "$BASE/api/orgs")" = "200" ]; then
             echo "curl_auth=-u '${USER}:${PASS}'" >> $GITHUB_OUTPUT
@@ -111,13 +111,13 @@ jobs:
           echo "API file: $API_FILE"
           echo "Parsed name: $NAME, version: $VER"
 
-          # EP1="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/draft-apis?replace=true"
-          # EP2="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/apis?replace=true"
-          # EP3="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/apis/${NAME}/${VER}"
+          # EP1="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-apis?replace=true"
+          # EP2="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/apis?replace=true"
+          # EP3="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/apis/${NAME}/${VER}"
 
-          EP1="${APIC_BASE_TCS_EI_TCS_EI_MANAGER}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/draft-apis?replace=true"
-          EP2="${APIC_BASE_TCS_EI_TCS_EI_MANAGER}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/apis?replace=true"
-          EP3="${APIC_BASE_TCS_EI_TCS_EI_MANAGER}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/apis/${NAME}/${VER}/document"
+          EP1="${APIC_BASE_MANAGER_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-apis?replace=true"
+          EP2="${APIC_BASE_MANAGER_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/apis?replace=true"
+          EP3="${APIC_BASE_MANAGER_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/apis/${NAME}/${VER}/document"
 
           post_yaml() {
             local url="$1"
@@ -178,9 +178,9 @@ jobs:
           echo "Product file: $PRODUCT_FILE"
           echo "Parsed name: $NAME, version: $VER"
 
-          EP1="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/draft-products?replace=true"
-          EP2="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/products?replace=true"
-          EP3="${APIC_BASE_TCS_EI_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI_TCS_EI}/drafts/products/${NAME}:${VER}"
+          EP1="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/draft-products?replace=true"
+          EP2="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/products?replace=true"
+          EP3="${APIC_BASE_TCS_EI}/api/orgs/${APIC_ORG_TCS_EI}/drafts/products/${NAME}:${VER}"
 
           post_yaml() {
             local url="$1"
@@ -236,8 +236,8 @@ jobs:
         run: |
           set -euo pipefail
           PRODUCT_FILE="${{ github.event.inputs.product_file }}"
-          PUB_URL="${APIC_BASE_TCS_EI_TCS_EI}/api/catalogs/${APIC_ORG_TCS_EI_TCS_EI}/${APIC_CATALOG_TCS_EI_TCS_EI}/products?stage=true"
-          echo "Publishing Product to catalog: ${APIC_CATALOG_TCS_EI_TCS_EI}"
+          PUB_URL="${APIC_BASE_TCS_EI}/api/catalogs/${APIC_ORG_TCS_EI}/${APIC_CATALOG_TCS_EI}/products?stage=true"
+          echo "Publishing Product to catalog: ${APIC_CATALOG_TCS_EI}"
           curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
             -H "Content-Type: application/yaml" \
             --data-binary @"$PRODUCT_FILE" \
@@ -251,8 +251,8 @@ jobs:
         run: |
           set -euo pipefail
           API_FILE="${{ github.event.inputs.api_file }}"
-          PUB_URL="${APIC_BASE_TCS_EI_TCS_EI}/api/catalogs/${APIC_ORG_TCS_EI_TCS_EI}/${APIC_CATALOG_TCS_EI_TCS_EI}/apis?stage=true"
-          echo "Publishing API directly to catalog: ${APIC_CATALOG_TCS_EI_TCS_EI}"
+          PUB_URL="${APIC_BASE_TCS_EI}/api/catalogs/${APIC_ORG_TCS_EI}/${APIC_CATALOG_TCS_EI}/apis?stage=true"
+          echo "Publishing API directly to catalog: ${APIC_CATALOG_TCS_EI}"
           curl -fsS -X POST ${{ steps.auth.outputs.curl_auth }} \
             -H "Content-Type: application/yaml" \
             --data-binary @"${API_FILE}" \
